@@ -147,13 +147,48 @@ export function useApi(credentials: ApiCredentials | null) {
     try {
       const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates`;
 
+      // Clonar datos de entrada para poder mutar
       let payload = { ...templateData };
       console.debug('[useApi] createTemplate input data', payload);
 
-      // Si es HEADER de tipo MEDIA (IMAGE/VIDEO/DOCUMENT), inyectar example.header_handle
+      // Normalizar TTL
+      if (payload.ttl) {
+        payload.message_send_ttl_seconds = payload.ttl;
+        delete payload.ttl;
+      }
+
+      // Intentar PRIMERO vía servidor `/create-template` para mantener secretos del lado servidor
+      // - Si hay archivo: enviar multipart con `metadata` y `file`
+      // - Si no hay archivo: enviar solo `metadata`
+      try {
+        const serverForm = new FormData();
+        const hasFile = Boolean(payload.headerMediaFile?.file);
+        // Remover hints locales que el servidor no espera
+        const metadataOnly = { ...payload };
+        if (metadataOnly.headerMediaFile) delete (metadataOnly as any).headerMediaFile;
+        if (metadataOnly.headerMediaUrl) delete (metadataOnly as any).headerMediaUrl;
+        serverForm.append('metadata', JSON.stringify(metadataOnly));
+        if (hasFile) {
+          const { file } = payload.headerMediaFile as { file: File, format: 'IMAGE'|'VIDEO'|'DOCUMENT' };
+          serverForm.append('file', file, file.name);
+        }
+        const serverRes = await fetch('/create-template', { method: 'POST', body: serverForm });
+        if (!serverRes.ok) {
+          const txt = await serverRes.text().catch(() => '');
+          throw new Error(`Servidor respondió ${serverRes.status}: ${txt}`);
+        }
+        const serverJson = await serverRes.json();
+        console.debug('[useApi] server /create-template response', serverJson);
+        toast.success('Plantilla creada exitosamente');
+        return serverJson;
+      } catch (serverErr) {
+        console.warn('[useApi] servidor /create-template falló, se usa fallback cliente:', serverErr);
+      }
+
+      // FALLBACK CLIENTE: comportamiento anterior
+      // 1) Si hay archivo, obtener handle con resumable o /media y adjuntar en example.header_handle
       if (payload.headerMediaFile) {
         const { file, format } = payload.headerMediaFile as { file: File, format: 'IMAGE'|'VIDEO'|'DOCUMENT' };
-        // Intentar primero subida reanudable para obtener handle válido; si no hay appId, usar /media
         let handleOrId: string | null = null;
         try {
           handleOrId = await resumableUpload(file);
@@ -169,8 +204,9 @@ export function useApi(credentials: ApiCredentials | null) {
           }
           return c;
         });
-        delete payload.headerMediaFile;
+        delete (payload as any).headerMediaFile;
       } else if (payload.headerMediaUrl) {
+        // 2) Si hay URL, subirla a /media y adjuntar id
         const { url: mediaUrl, format } = payload.headerMediaUrl as { url: string, format: 'IMAGE'|'VIDEO'|'DOCUMENT' };
         const mime = format === 'IMAGE' ? undefined : format === 'VIDEO' ? 'video/mp4' : 'application/pdf';
         const mediaId = await uploadMediaFromUrl(mediaUrl, mime);
@@ -181,16 +217,10 @@ export function useApi(credentials: ApiCredentials | null) {
           }
           return c;
         });
-        delete payload.headerMediaUrl;
+        delete (payload as any).headerMediaUrl;
       }
 
-      // include ttl if provided
-      if (payload.ttl) {
-        payload.message_send_ttl_seconds = payload.ttl;
-        delete payload.ttl;
-      }
-
-      console.debug('[useApi] createTemplate payload', payload);
+      console.debug('[useApi] createTemplate payload (fallback)', payload);
       const result = await makeRequest(url, {
         method: 'POST',
         body: JSON.stringify(payload),
