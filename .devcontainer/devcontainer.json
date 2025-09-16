@@ -1,0 +1,25 @@
+{
+  "name": "Whatsapp-Marketing Dev",
+  "build": {
+    "context": "..",
+    "dockerfile": "../Dockerfile",
+    "target": "dev"
+  },
+  "workspaceFolder": "/app",
+  "forwardPorts": [5173],
+  "containerEnv": {
+    "CHOKIDAR_USEPOLLING": "true"
+  },
+  "mounts": [
+    "source=devcontainer-node-modules,target=/app/node_modules,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  }
+}
