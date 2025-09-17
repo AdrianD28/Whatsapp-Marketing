@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 interface SendFormData {
   templateName: string;
   delay: number;
+  headerImageUrl?: string;
 }
 
 export function Send() {
@@ -35,6 +36,14 @@ export function Send() {
 
     if (!selectedTemplate) {
       toast.error('Selecciona una plantilla válida');
+      return;
+    }
+
+    // Validar si la plantilla requiere HEADER de tipo IMAGE
+    const headerComponent = selectedTemplate.components.find(c => c.type === 'HEADER');
+    const requiresHeaderImage = headerComponent && (headerComponent as any).format === 'IMAGE';
+    if (requiresHeaderImage && !data.headerImageUrl) {
+      toast.error('La plantilla requiere una imagen de cabecera. Proporciona una URL de imagen.');
       return;
     }
 
@@ -72,13 +81,22 @@ export function Send() {
         
         for (const lang of languages) {
           try {
-            const messageParams = parameters ? 
+            // Construir parámetros en el formato esperado por la API
+            // - Header IMAGE: { type: 'image', image: { link: url } }
+            // - Body placeholders: { type: 'text', text: value }
+            const bodyParams = parameters ? 
               parameters.map(p => {
                 const index = p.replace(/\{\{|\}\}/g, '');
-                return index === '1' ? contact.Nombre : contact.Numero;
+                const value = index === '1' ? contact.Nombre : contact.Numero;
+                return { type: 'text', text: String(value) } as any;
               }) : [];
 
-            await sendMessage(contact.Numero, selectedTemplate.name, lang, messageParams);
+            const params: any[] = [...bodyParams];
+            if (requiresHeaderImage && data.headerImageUrl) {
+              params.unshift({ type: 'image', image: { link: data.headerImageUrl } });
+            }
+
+            await sendMessage(contact.Numero, selectedTemplate.name, lang, params);
             messageSent = true;
             successCount++;
             break;
@@ -172,6 +190,18 @@ export function Send() {
                 <p className="text-sm text-red-400 mt-1">{errors.templateName.message}</p>
               )}
             </div>
+
+            {/* Campo para URL de imagen si la plantilla requiere HEADER IMAGE */}
+            {selectedTemplate && selectedTemplate.components.some((c: any) => c.type === 'HEADER' && c.format === 'IMAGE') && (
+              <Input
+                label="URL de imagen para cabecera"
+                placeholder="https://..."
+                {...register('headerImageUrl', { required: 'Se requiere una imagen para la cabecera' })}
+                error={errors.headerImageUrl?.message}
+                helperText="Imagen pública accesible (JPG/PNG). Se enviará en el header."
+                disabled={sending}
+              />
+            )}
 
             <Input
               label="Retraso entre mensajes (segundos)"
