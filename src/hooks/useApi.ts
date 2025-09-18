@@ -247,14 +247,18 @@ export function useApi(credentials: ApiCredentials | null) {
     };
     if (namespace) templateObj.namespace = namespace;
 
-    // Soporta parameters para body o header image. Si parameters es un arreglo de objetos con { type:'image'|'text', image?:{link}, text?:string }
+  // Soporta parameters para body o header image.
+  // Formato esperado: { type:'image'|'text', image?:{link?:string,id?:string}, text?:string }
     if (Array.isArray(parameters) && parameters.length > 0) {
       // agrupar por tipo: si existe object with type 'image' lo ponemos en header parameters
       const headerParams: any[] = [];
       const bodyParams: any[] = [];
       for (const p of parameters) {
-        if (p?.type === 'image' && p.image?.link) {
-          headerParams.push({ type: 'image', image: { link: p.image.link } });
+        if (p?.type === 'image' && (p.image?.link || p.image?.id)) {
+          const img: any = {};
+          if (p.image.link) img.link = p.image.link;
+          if (p.image.id) img.id = p.image.id;
+          headerParams.push({ type: 'image', image: img });
         } else if (p?.type === 'text' && typeof p.text === 'string') {
           bodyParams.push({ type: 'text', text: p.text });
         }

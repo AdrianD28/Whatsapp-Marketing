@@ -8,11 +8,13 @@ import { Input } from '../components/ui/Input';
 import { useAppContext } from '../context/AppContext';
 import { useApi } from '../hooks/useApi';
 import toast from 'react-hot-toast';
+import { HelpTooltip } from '../components/ui/HelpTooltip';
 
 interface SendFormData {
   templateName: string;
   delay: number;
   headerImageUrl?: string;
+  headerImageFile?: FileList;
 }
 
 export function Send() {
@@ -42,10 +44,7 @@ export function Send() {
     // Validar si la plantilla requiere HEADER de tipo IMAGE
     const headerComponent = selectedTemplate.components.find(c => c.type === 'HEADER');
     const requiresHeaderImage = headerComponent && (headerComponent as any).format === 'IMAGE';
-    if (requiresHeaderImage && !data.headerImageUrl) {
-      toast.error('La plantilla requiere una imagen de cabecera. Proporciona una URL de imagen.');
-      return;
-    }
+    // Permitimos URL o subir un archivo una vez (se sube a /media y se reutiliza el id)
 
     setSending(true);
     setSendProgress({ total: contacts.length, sent: 0, percentage: 0, isActive: true });
@@ -92,8 +91,38 @@ export function Send() {
               }) : [];
 
             const params: any[] = [...bodyParams];
-            if (requiresHeaderImage && data.headerImageUrl) {
-              params.unshift({ type: 'image', image: { link: data.headerImageUrl } });
+            if (requiresHeaderImage) {
+              let headerImageParam: any = null;
+              // Preferir archivo -> media id
+              const file = data.headerImageFile?.[0];
+              if (file && apiCredentials) {
+                try {
+                  const form = new FormData();
+                  form.append('file', file, file.name);
+                  const r = await fetch('/upload-media', {
+                    method: 'POST',
+                    body: form,
+                    headers: {
+                      'x-phone-number-id': apiCredentials.phoneNumberId,
+                      'x-access-token': apiCredentials.accessToken,
+                    }
+                  });
+                  if (r.ok) {
+                    const j = await r.json();
+                    if (j?.id) headerImageParam = { type: 'image', image: { id: j.id } };
+                  } else {
+                    console.warn('upload-media failed on send', await r.text().catch(() => ''));
+                  }
+                } catch (e) { console.warn('upload-media error on send', e); }
+              }
+              // Fallback a link si no hubo id
+              if (!headerImageParam && data.headerImageUrl) {
+                headerImageParam = { type: 'image', image: { link: data.headerImageUrl } };
+              }
+              if (!headerImageParam) {
+                throw new Error('La plantilla requiere imagen de cabecera: provee URL pública o sube un archivo.');
+              }
+              params.unshift(headerImageParam);
             }
 
             await sendMessage(contact.Numero, selectedTemplate.name, lang, params);
@@ -193,14 +222,30 @@ export function Send() {
 
             {/* Campo para URL de imagen si la plantilla requiere HEADER IMAGE */}
             {selectedTemplate && selectedTemplate.components.some((c: any) => c.type === 'HEADER' && c.format === 'IMAGE') && (
-              <Input
-                label="URL de imagen para cabecera"
-                placeholder="https://..."
-                {...register('headerImageUrl', { required: 'Se requiere una imagen para la cabecera' })}
-                error={errors.headerImageUrl?.message}
-                helperText="Imagen pública accesible (JPG/PNG). Se enviará en el header."
-                disabled={sending}
-              />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Input
+                    label="URL de imagen para cabecera"
+                    placeholder="https://..."
+                    {...register('headerImageUrl')}
+                    error={errors.headerImageUrl?.message}
+                    helperText="Opción 1: URL pública (JPG/PNG)."
+                    disabled={sending}
+                  />
+                  <HelpTooltip title="Políticas Meta (imagen header)" tooltip="Por qué necesitas pasar imagen al enviar">
+                    <ul className="list-disc ml-4">
+                      <li>La imagen usada en la aprobación es un ejemplo, no viaja en los envíos reales.</li>
+                      <li>En cada envío debes adjuntar la imagen del header: como URL pública o como media ID.</li>
+                      <li>Usar media ID (subiendo el archivo una vez) evita exponer URLs públicas y cumple políticas.</li>
+                    </ul>
+                  </HelpTooltip>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-200">Subir imagen una sola vez (se usa media ID)</label>
+                  <input type="file" accept="image/*" className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600" {...register('headerImageFile')} />
+                  <p className="text-xs text-gray-400">Opción 2: sube una imagen y usaremos su <code>media id</code> durante el envío.</p>
+                </div>
+              </div>
             )}
 
             <Input

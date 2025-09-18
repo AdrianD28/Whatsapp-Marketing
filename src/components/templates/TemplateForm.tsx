@@ -6,6 +6,7 @@ import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { useAppContext } from '../../context/AppContext';
+import { HelpTooltip } from '../ui/HelpTooltip';
 
 interface TemplateFormData {
   name: string;
@@ -269,7 +270,19 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-200 mb-2">Tipo de Encabezado (Opcional)</label>
+            <label className="block text-sm font-medium text-gray-200 mb-2">
+              Tipo de Encabezado (Opcional)
+              <HelpTooltip
+                title="Encabezado de plantilla (políticas Meta)"
+                tooltip="El encabezado puede ser texto, imagen, video o documento."
+              >
+                <ul className="list-disc ml-4">
+                  <li>Si eliges IMAGEN/VIDEO/DOCUMENTO, Meta exige un ejemplo válido para aprobar.</li>
+                  <li>El ejemplo puede ser un handle o un link accesible públicamente.</li>
+                  <li>Este ejemplo es solo para aprobación; al enviar debes pasar el medio del header como parámetro.</li>
+                </ul>
+              </HelpTooltip>
+            </label>
             <select
               {...register('headerType')}
               className="w-full rounded-lg border-gray-600 bg-gray-700 text-white focus:border-green-500 focus:ring-green-500"
@@ -316,7 +329,12 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                   />
                 );
               })()}
-              <p className="text-sm text-gray-400">Puedes pegar una URL o subir un archivo. Usar archivo suele ser más confiable.</p>
+              <p className="text-sm text-gray-400 flex items-start gap-2">
+                Puedes pegar una URL o subir un archivo. Usar archivo suele ser más confiable.
+                <HelpTooltip title="Ejemplo requerido por Meta" tooltip="Por qué a veces te pide URL">
+                  <p>Para aprobar la plantilla, Meta requiere un ejemplo válido del medio. Intentamos generar un "handle" subiendo el archivo por API. Si no es posible, te pedimos una URL accesible públicamente para usar como preview. Esto no incumple políticas.</p>
+                </HelpTooltip>
+              </p>
             </div>
           )}
 
@@ -343,7 +361,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
             {...register('ttl')}
           />
 
-          <div className="pt-2">
+            <div className="pt-2">
             <label className="block text-sm font-medium text-gray-200 mb-2">Botones</label>
             <div className="space-y-3">
               {(watch('buttons') || []).map((_, idx) => (
@@ -363,7 +381,15 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                     {watch(`buttons.${idx}.type` as const) === 'URL' && (
                       <>
                         <div>
-                          <Input label="URL" placeholder="https://... o ...?q={{1}}" icon={LinkIcon} {...register(`buttons.${idx}.url` as const)} />
+                          <div className="flex items-center">
+                            <Input label="URL" placeholder="https://... o ...?q={{1}}" icon={LinkIcon} {...register(`buttons.${idx}.url` as const)} />
+                            <HelpTooltip title="URL con variables" tooltip="Cómo completar el ejemplo">
+                              <p>
+                                Si tu URL de botón incluye variables como <code>{"{{1}}"}</code>, Meta exige un ejemplo de valor para aprobación. 
+                                Completa "Ejemplo" con un valor representativo. En envío real, se reemplazará por los parámetros.
+                              </p>
+                            </HelpTooltip>
+                          </div>
                         </div>
                         <div>
                           <Input label="Ejemplo (si URL tiene {{}})" placeholder="valor-ejemplo" {...register(`buttons.${idx}.urlExample` as const)} />
