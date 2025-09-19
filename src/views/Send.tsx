@@ -61,7 +61,7 @@ export function Send() {
   const [strictMode, setStrictMode] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem(STRICT_KEY);
-      return v === null ? true : v === 'true';
+      return v === null ? false : v === 'true';
     } catch { return true; }
   });
   const toggleStrictMode = () => {
@@ -372,6 +372,11 @@ export function Send() {
                           </ul>
                         </HelpTooltip>
                       </div>
+                      {cached?.id && (
+                        <div>
+                          <Button type="button" variant="secondary" onClick={() => { setTemplateMedia(selectedTemplate.name, {} as any); toast.success('Media cache limpiado'); }}>Borrar media de esta plantilla</Button>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-200">Subir imagen (obtener/actualizar media id)</label>
                         <input type="file" accept="image/*" className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600" {...register('headerImageFile')} />
@@ -390,6 +395,9 @@ export function Send() {
                           <label className="block text-sm font-medium text-gray-200">Subir imagen (opcional)</label>
                           <input type="file" accept="image/*" className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600" {...register('headerImageFile')} />
                         </div>
+                      </div>
+                      <div>
+                        <Button type="button" variant="secondary" onClick={() => { setTemplateMedia(selectedTemplate.name, {} as any); toast.success('Media cache limpiado'); }}>Borrar media de esta plantilla</Button>
                       </div>
                     </div>
                   );

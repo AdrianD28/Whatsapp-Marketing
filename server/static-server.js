@@ -21,6 +21,9 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// JSON body for webhooks/APIs
+app.use(express.json({ limit: '1mb' }));
+
 app.use('/static', express.static(staticDir));
 
 // Serve frontend `dist` if it exists (SPA fallback to index.html)
@@ -139,6 +142,7 @@ app.get('/env-check', (req, res) => {
     ACCESS_TOKEN: present(process.env.ACCESS_TOKEN),
     PHONE_NUMBER_ID: present(process.env.PHONE_NUMBER_ID),
     BUSINESS_ACCOUNT_ID: present(process.env.BUSINESS_ACCOUNT_ID),
+    WEBHOOK_VERIFY_TOKEN: present(process.env.WEBHOOK_VERIFY_TOKEN),
     STATIC_DIR: present(process.env.STATIC_DIR) ? process.env.STATIC_DIR : '(default /app/server/static)'
   });
 });
@@ -169,6 +173,51 @@ app.get('/diag/wa', async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: 'diag_failed', detail: String(err) });
   }
+});
+
+// WhatsApp Webhook (verification + status logging)
+const webhookLog = [];
+app.get('/webhook/whatsapp', (req, res) => {
+  const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN || 'changeme';
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === verifyToken) {
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).send('Forbidden');
+});
+app.post('/webhook/whatsapp', (req, res) => {
+  try {
+    const body = req.body || {};
+    // Log minimal info about statuses
+    const entries = body.entry || [];
+    for (const e of entries) {
+      const changes = e.changes || [];
+      for (const c of changes) {
+        const v = c.value || {};
+        const statuses = v.statuses || [];
+        for (const s of statuses) {
+          webhookLog.push({
+            time: new Date().toISOString(),
+            id: s.id,
+            status: s.status,
+            recipient: s.recipient_id,
+            errors: s.errors,
+            biz: v.metadata?.display_phone_number,
+          });
+        }
+      }
+    }
+    // Keep last 200
+    if (webhookLog.length > 200) webhookLog.splice(0, webhookLog.length - 200);
+    return res.sendStatus(200);
+  } catch (err) {
+    return res.sendStatus(200);
+  }
+});
+app.get('/webhook/log', (req, res) => {
+  res.json(webhookLog.slice(-100));
 });
 
 // Create template server-side: recibe metadata + file opcional y crea la plantilla en Graph API
