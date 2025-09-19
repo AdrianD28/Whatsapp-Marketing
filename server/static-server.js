@@ -201,37 +201,58 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
       }
     }
 
-    // Si viene headerMediaUrl (URL pública) subirla a /{phone_number_id}/media y usar ese id como header_handle
+    // Si viene headerMediaUrl (URL pública) descargar y usar subida reanudable a APP_ID para obtener handle válido
     if (payload.headerMediaUrl && payload.components && Array.isArray(payload.components)) {
-      const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
-      if (!phoneNumberId) return res.status(400).json({ error: 'phone_number_id_required' });
-      const url = payload.headerMediaUrl.url;
+      const appId = req.headers['x-app-id'] || req.body.appId || process.env.APP_ID;
+      if (!appId) return res.status(400).json({ error: 'app_id_required', detail: 'Se requiere APP_ID para crear handle de ejemplo desde URL' });
+      const urlStr = payload.headerMediaUrl.url;
       const fmt = (payload.headerMediaUrl.format || '').toUpperCase();
-      if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'invalid_url' });
-      const form = new FormData();
-      form.append('messaging_product', 'whatsapp');
-      form.append('link', url);
-      // Proveer hint de tipo para que Graph no exija 'file' erróneamente
-      const lower = String(url).toLowerCase();
-      let mime = undefined;
-      if (fmt === 'IMAGE') {
-        mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-      } else if (fmt === 'VIDEO') {
-        mime = lower.endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
-      } else if (fmt === 'DOCUMENT') {
-        mime = lower.endsWith('.pdf') ? 'application/pdf' : lower.endsWith('.doc') ? 'application/msword' : lower.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : lower.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream';
+      if (!/^https?:\/\//i.test(urlStr)) return res.status(400).json({ error: 'invalid_url' });
+      // Descargar contenido
+      const dlRes = await fetch(urlStr, { redirect: 'follow' });
+      if (!dlRes.ok) {
+        const t = await dlRes.text().catch(() => '');
+        return res.status(400).json({ error: 'download_failed', detail: t || dlRes.status });
       }
-      if (mime) form.append('type', mime);
-      const uploadRes = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
-      if (!uploadRes.ok) {
-        const text = await uploadRes.text().catch(() => '');
-        return res.status(500).json({ error: 'media_upload_from_url_failed', detail: text });
+      const ab = await dlRes.arrayBuffer();
+      const buffer = Buffer.from(ab);
+      const guessed = (() => {
+        const ct = (dlRes.headers.get('content-type') || '').toLowerCase();
+        if (ct) return ct;
+        const lower = String(urlStr).toLowerCase();
+        if (fmt === 'IMAGE') return lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+        if (fmt === 'VIDEO') return lower.endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+        if (fmt === 'DOCUMENT') return lower.endsWith('.pdf') ? 'application/pdf' : lower.endsWith('.doc') ? 'application/msword' : lower.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : lower.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream';
+        return 'application/octet-stream';
+      })();
+      // Derivar nombre
+      let fileName = 'media';
+      try {
+        const u = new URL(urlStr);
+        const base = u.pathname.split('/').pop();
+        if (base) fileName = base;
+      } catch {}
+      // Iniciar subida reanudable
+      const initUrl = `https://graph.facebook.com/v19.0/${appId}/uploads?file_name=${encodeURIComponent(fileName)}&file_length=${buffer.length}&file_type=${encodeURIComponent(guessed)}`;
+      const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}` } });
+      if (!initRes.ok) {
+        const text = await initRes.text().catch(() => '');
+        return res.status(500).json({ error: 'resumable_init_failed', detail: text || initRes.status });
       }
-      const upJson = await uploadRes.json();
-      const mediaId = upJson.id;
-      if (!mediaId) return res.status(500).json({ error: 'no_media_id_returned' });
+      const initJson = await initRes.json();
+      const uploadId = initJson.id || initJson.upload_session_id;
+      if (!uploadId) return res.status(500).json({ error: 'no_upload_id_returned', initJson });
+      const uploadUrl = `https://graph.facebook.com/v19.0/${uploadId}`;
+      const upRes = await fetch(uploadUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}`, file_offset: '0', 'Content-Type': 'application/octet-stream' }, body: buffer });
+      if (!upRes.ok) {
+        const text = await upRes.text().catch(() => '');
+        return res.status(500).json({ error: 'resumable_upload_failed', detail: text || upRes.status });
+      }
+      const upJson = await upRes.json();
+      const handle = upJson.h;
+      if (!handle) return res.status(500).json({ error: 'no_handle_returned', upJson });
       payload.components = payload.components.map((c) => {
-        if (c.type === 'HEADER') return Object.assign({}, c, { example: { header_handle: [mediaId] } });
+        if (c.type === 'HEADER') return Object.assign({}, c, { example: { header_handle: [handle] } });
         return c;
       });
       delete payload.headerMediaUrl;
