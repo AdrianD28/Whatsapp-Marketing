@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Send as SendIcon, Play, Pause, Users } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -54,6 +54,18 @@ export function Send() {
     const m = loadCache(); m[name] = entry; saveCache(m);
   };
 
+  // Borrar todo el cache de media al abrir la vista de Envío (comportamiento por defecto solicitado)
+  useEffect(() => {
+    try { localStorage.removeItem(CACHE_KEY); } catch {}
+  }, []);
+
+  // Borrar el cache de la plantilla seleccionada cuando cambia de selección
+  useEffect(() => {
+    if (selectedTemplateName) {
+      setTemplateMedia(selectedTemplateName, {} as any);
+    }
+  }, [selectedTemplateName]);
+
   const isValidHttpUrl = (s?: string) => !!s && /^https?:\/\//i.test(s);
 
   // Strict Mode (localStorage)
@@ -100,9 +112,9 @@ export function Send() {
       type: 'info',
     });
 
-    const bodyComponent = selectedTemplate.components.find(c => c.type === 'BODY');
-    const parameters = bodyComponent?.text?.match(/\{\{(\d+)\}\}/g);
-    const languages = [selectedTemplate.language, 'es_ES', 'es_LA', 'es_MX'];
+  const bodyComponent = selectedTemplate.components.find(c => c.type === 'BODY');
+  const parameters = bodyComponent?.text?.match(/\{\{(\d+)\}\}/g);
+  const languages = [selectedTemplate.language, 'es_ES', 'es_LA', 'es_MX', 'en_US'];
 
   let successCount = 0;
   let errorCount = 0;
@@ -119,7 +131,9 @@ export function Send() {
         });
       }
 
-      const contact = contacts[i];
+  const contact = contacts[i];
+  // Normalizar número a dígitos (paridad con ejemplos cURL sin '+')
+  const toNumber = String(contact.Numero || '').replace(/[^\d]/g, '').replace(/^00/, '');
       
       try {
         let messageSent = false;
@@ -235,7 +249,13 @@ export function Send() {
               }
             }
 
-            await sendMessage(contact.Numero, selectedTemplate.name, lang, params);
+            const resp = await sendMessage(toNumber, selectedTemplate.name, lang, params);
+            try {
+              const msgId = resp?.messages?.[0]?.id;
+              if (msgId && !mediaLogged) {
+                addActivity({ title: 'Mensaje aceptado', description: `ID: ${msgId} (${lang})`, type: 'success' });
+              }
+            } catch {}
             messageSent = true;
             successCount++;
             break;
@@ -282,6 +302,8 @@ export function Send() {
   setChecklistConfirmed(false);
   setShowChecklist(false);
   setPendingData(null);
+  // Limpiar cache de media al finalizar el envío
+  try { localStorage.removeItem(CACHE_KEY); } catch {}
     
     addActivity({
       title: 'Envío completado',
