@@ -166,21 +166,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
           }
         } catch (e) { console.warn('resumable attempt error', e); }
 
-        // 2) intentar upload-media proxy para obtener media id (si no hay handle)
-        if (!usedHandle && apiCredentials?.phoneNumberId && apiCredentials?.accessToken) {
-          try {
-            const form2 = new FormData(); form2.append('file', f, f.name);
-            const r2 = await fetch('/upload-media', { method: 'POST', body: form2, headers: {
-              'x-phone-number-id': apiCredentials.phoneNumberId,
-              'x-access-token': apiCredentials.accessToken,
-            }});
-            if (r2.ok) {
-              const j2 = await r2.json(); if (j2?.id) usedHandle = j2.id;
-            } else { console.warn('upload-media failed', await r2.text().catch(() => '')); }
-          } catch (e) { console.warn('upload-media attempt error', e); }
-        }
-
-        // 3) fallback: subir a static server y usar URL (no garantiza que Meta acepte el link para header_handle)
+        // 2) fallback: subir a static server y usar URL preview (Meta acepta preview URL para aprobación)
         if (!usedHandle) {
           try {
             const form3 = new FormData(); form3.append('file', f, f.name);
@@ -203,6 +189,9 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
         templateData.headerMediaUrl = { url: data.headerValue, format: data.headerType };
         const hdrIdx = templateData.components.findIndex((c: any) => c.type === 'HEADER');
         if (hdrIdx >= 0) templateData.components[hdrIdx].example = { header_handle_preview_url: data.headerValue };
+      } else {
+        // Sin archivo ni URL: invalidar
+        throw new Error('Para HEADER de tipo media, proporciona un archivo o una URL pública como ejemplo.');
       }
     }
 
@@ -222,7 +211,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
           Nueva Plantilla
         </h3>
         
-        <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
+  <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
           <Input
             label="Nombre de la Plantilla"
             placeholder="mi_plantilla_promocional"
@@ -312,7 +301,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
 
           {['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && (
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-200">Archivo de {watchedValues.headerType === 'IMAGE' ? 'Imagen' : watchedValues.headerType === 'VIDEO' ? 'Video' : 'Documento'} (opcional)</label>
+              <label className="block text-sm font-medium text-gray-200">Archivo de {watchedValues.headerType === 'IMAGE' ? 'Imagen' : watchedValues.headerType === 'VIDEO' ? 'Video' : 'Documento'}</label>
               {(() => {
                 const fileReg = register('headerFile');
                 return (
@@ -330,9 +319,11 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                 );
               })()}
               <p className="text-sm text-gray-400 flex items-start gap-2">
-                Puedes pegar una URL o subir un archivo. Usar archivo suele ser más confiable.
-                <HelpTooltip title="Ejemplo requerido por Meta" tooltip="Por qué a veces te pide URL">
-                  <p>Para aprobar la plantilla, Meta requiere un ejemplo válido del medio. Intentamos generar un "handle" subiendo el archivo por API. Si no es posible, te pedimos una URL accesible públicamente para usar como preview. Esto no incumple políticas.</p>
+                Meta exige un ejemplo válido del medio para aprobar la plantilla.
+                <HelpTooltip title="Ejemplo del header" tooltip="Handle vs URL">
+                  <p>
+                    Intentamos generar un handle subiendo el archivo (requiere App ID y token válidos). Si no es posible, debes proporcionar una URL pública del medio para usarla como preview. El media id de mensajes NO sirve como handle para plantillas.
+                  </p>
                 </HelpTooltip>
               </p>
             </div>
@@ -424,11 +415,22 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
             </div>
           </div>
 
+          {['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue && !(watchedValues.headerFile && watchedValues.headerFile[0]) && (
+            <div className="p-3 rounded bg-yellow-900/20 text-yellow-200 text-sm">
+              Debes proporcionar un ejemplo del header: sube un archivo o pega una URL pública (https). Meta lo requiere para aprobar la plantilla.
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4">
             <Button type="button" variant="secondary" onClick={onCancel} className="flex-1">
               Cancelar
             </Button>
-            <Button type="submit" loading={loading} className="flex-1">
+            <Button
+              type="submit"
+              loading={loading}
+              className="flex-1"
+              disabled={['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue && !(watchedValues.headerFile && watchedValues.headerFile[0])}
+            >
               Crear Plantilla
             </Button>
           </div>

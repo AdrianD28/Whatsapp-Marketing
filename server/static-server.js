@@ -187,20 +187,8 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
         }
       }
 
-      // 2) si no handle, subir a /{phone_number_id}/media si PHONE_NUMBER_ID está en env
-      const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
-      if (!handle && phoneNumberId) {
-        try {
-          const form = new FormData();
-          form.append('messaging_product', 'whatsapp');
-          form.append('file', fs.createReadStream(filePath), req.file.originalname);
-          const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/media`;
-          const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
-          if (r.ok) {
-            const j = await r.json(); if (j?.id) handle = j.id;
-          }
-        } catch (err) { console.warn('upload-media server attempt failed', err); }
-      }
+      // 2) NO usar media ID como handle (no es válido para creación de plantillas)
+      // Si no hay handle, se usará preview URL más abajo.
 
       // 3) si tenemos handle, inyectarlo en el componente HEADER correspondiente
       if (handle) {
