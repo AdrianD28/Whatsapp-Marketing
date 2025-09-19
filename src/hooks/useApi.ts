@@ -242,8 +242,13 @@ export function useApi(credentials: ApiCredentials | null) {
       toast.success('Plantilla creada exitosamente');
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Error desconocido';
-      toast.error(`Error al crear plantilla: ${message}`);
+      const raw = error instanceof Error ? error.message : String(error ?? 'Error desconocido');
+      const normalized = raw || 'Error desconocido';
+      if (/2388023/.test(normalized) || /Se está eliminando el idioma/i.test(normalized) || /Spanish \(SPA\)/i.test(normalized)) {
+        toast.error('Meta bloquea re-crear el mismo idioma de una plantilla en eliminación. Usa otro nombre (p. ej. _v2) u otro locale (es_MX/es_LA) o espera 4 semanas.');
+      } else {
+        toast.error(`Error al crear plantilla: ${normalized}`);
+      }
       throw error;
     } finally {
       setLoading(false);

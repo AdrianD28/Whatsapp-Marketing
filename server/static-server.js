@@ -143,6 +143,34 @@ app.get('/env-check', (req, res) => {
   });
 });
 
+// Diagnostics: Verify WA token + assets
+app.get('/diag/wa', async (req, res) => {
+  try {
+    const accessToken = req.headers['x-access-token'] || req.query.accessToken || process.env.ACCESS_TOKEN;
+    const phoneNumberId = req.headers['x-phone-number-id'] || req.query.phoneNumberId || process.env.PHONE_NUMBER_ID;
+    const businessAccountId = req.headers['x-business-account-id'] || req.query.businessAccountId || process.env.BUSINESS_ACCOUNT_ID;
+    if (!accessToken) return res.status(400).json({ error: 'access_token_required' });
+    const out = {};
+    if (phoneNumberId) {
+      const url = `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,whatsapp_business_account`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      out.phoneNumber = { status: r.status, data: await r.json().catch(() => ({})) };
+    } else {
+      out.phoneNumber = { warning: 'no phoneNumberId provided' };
+    }
+    if (businessAccountId) {
+      const url2 = `https://graph.facebook.com/v19.0/${businessAccountId}?fields=id,name,verification_status,owned_whatsapp_business_accounts{id,name}`;
+      const r2 = await fetch(url2, { headers: { Authorization: `Bearer ${accessToken}` } });
+      out.business = { status: r2.status, data: await r2.json().catch(() => ({})) };
+    } else {
+      out.business = { warning: 'no businessAccountId provided' };
+    }
+    return res.json(out);
+  } catch (err) {
+    return res.status(500).json({ error: 'diag_failed', detail: String(err) });
+  }
+});
+
 // Create template server-side: recibe metadata + file opcional y crea la plantilla en Graph API
 // Requiere en el servidor: BUSINESS_ACCOUNT_ID y ACCESS_TOKEN (en env vars)
 app.post('/create-template', upload.single('file'), async (req, res) => {
