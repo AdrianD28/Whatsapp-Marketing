@@ -14,7 +14,6 @@ interface TemplateFormData {
   category: string;
   headerType: '' | 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'LOCATION';
   headerValue: string;
-  headerFile?: FileList;
   body: string;
   footer: string;
   ttl?: number;
@@ -36,7 +35,7 @@ interface TemplateFormProps {
 export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFormProps) {
   const [preview, setPreview] = useState('');
   const [imageUrl, setImageUrl] = useState<string>('');
-  const { apiCredentials } = useAppContext();
+  const { } = useAppContext();
   const { register, handleSubmit, watch, formState: { errors }, setValue } = useForm<TemplateFormData>({
     defaultValues: {
       language: '',
@@ -50,16 +49,13 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
   const watchedValues = watch();
 
   React.useEffect(() => {
-    const { headerType, headerValue, body, footer, headerFile } = watchedValues as any;
+    const { headerType, headerValue, body, footer } = watchedValues as any;
     let previewText = '';
     
     if (headerType === 'TEXT' && headerValue) {
       previewText += `*${headerValue}*\n\n`;
     } else if (headerType === 'IMAGE') {
-      const file = headerFile?.[0];
-      let nextUrl = '';
-      if (file) nextUrl = URL.createObjectURL(file);
-      else if (headerValue) nextUrl = headerValue;
+      const nextUrl = headerValue || '';
       setImageUrl(prev => {
         if (prev && prev.startsWith('blob:') && prev !== nextUrl) URL.revokeObjectURL(prev);
         return nextUrl;
@@ -75,7 +71,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
     }
     
     setPreview(previewText);
-  }, [watchedValues.headerType, watchedValues.headerValue, watchedValues.body, watchedValues.footer, watchedValues.headerFile]);
+  }, [watchedValues.headerType, watchedValues.headerValue, watchedValues.body, watchedValues.footer]);
 
   const onFormSubmit = async (data: TemplateFormData) => {
     const components: any[] = [];
@@ -148,50 +144,11 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
     if (data.ttl && Number.isFinite(data.ttl)) templateData.message_send_ttl_seconds = Number(data.ttl);
 
     if (['IMAGE','VIDEO','DOCUMENT'].includes(data.headerType)) {
-      if (data.headerFile && data.headerFile[0]) {
-        const f = data.headerFile[0];
-        let usedHandle: string | null = null;
-
-        // 1) intentar resumable si tenemos appId + accessToken
-        try {
-          if (apiCredentials?.appId && apiCredentials?.accessToken) {
-            const form = new FormData(); form.append('file', f, f.name);
-            const r = await fetch('/resumable-upload', { method: 'POST', body: form, headers: {
-              'x-app-id': apiCredentials.appId,
-              'x-access-token': apiCredentials.accessToken,
-            }});
-            if (r.ok) {
-              const j = await r.json(); if (j?.handle) usedHandle = j.handle;
-            } else { console.warn('resumable-upload failed', await r.text().catch(() => '')); }
-          }
-        } catch (e) { console.warn('resumable attempt error', e); }
-
-        // 2) fallback: subir a static server y usar URL preview (Meta acepta preview URL para aprobación)
-        if (!usedHandle) {
-          try {
-            const form3 = new FormData(); form3.append('file', f, f.name);
-            const r3 = await fetch('/upload', { method: 'POST', body: form3 });
-            if (r3.ok) {
-              const j3 = await r3.json(); if (j3?.url) {
-                templateData.headerMediaUrl = { url: j3.url, format: data.headerType };
-                const hdrIdx = templateData.components.findIndex((c: any) => c.type === 'HEADER');
-                if (hdrIdx >= 0) templateData.components[hdrIdx].example = { header_handle_preview_url: j3.url };
-              }
-            } else { console.warn('static upload failed', await r3.text().catch(() => '')); }
-          } catch (e) { console.error('static upload error', e); if (data.headerValue) templateData.headerMediaUrl = { url: data.headerValue, format: data.headerType }; }
-        } else {
-          // Tenemos handle (resumable handle o media id), inyectarlo como example.header_handle requerido por templates con HEADER IMAGE
-          const hdrIdx = templateData.components.findIndex((c: any) => c.type === 'HEADER');
-          if (hdrIdx >= 0) templateData.components[hdrIdx].example = { header_handle: [usedHandle] };
-        }
-
-      } else if (data.headerValue) {
+      if (data.headerValue) {
+        // Requerimos URL: el servidor usará esta URL para obtener un media id y lo inyectará como header_handle
         templateData.headerMediaUrl = { url: data.headerValue, format: data.headerType };
-        const hdrIdx = templateData.components.findIndex((c: any) => c.type === 'HEADER');
-        if (hdrIdx >= 0) templateData.components[hdrIdx].example = { header_handle_preview_url: data.headerValue };
       } else {
-        // Sin archivo ni URL: invalidar
-        throw new Error('Para HEADER de tipo media, proporciona un archivo o una URL pública como ejemplo.');
+        throw new Error('Para HEADER de tipo media, proporciona una URL pública (https) como ejemplo.');
       }
     }
 
@@ -300,32 +257,8 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
           )}
 
           {['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && (
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-200">Archivo de {watchedValues.headerType === 'IMAGE' ? 'Imagen' : watchedValues.headerType === 'VIDEO' ? 'Video' : 'Documento'}</label>
-              {(() => {
-                const fileReg = register('headerFile');
-                return (
-                  <input
-                    type="file"
-                    accept={watchedValues.headerType === 'IMAGE' ? 'image/*' : watchedValues.headerType === 'VIDEO' ? 'video/*' : '.pdf,application/pdf,application/*'}
-                    className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-gray-200 hover:file:bg-gray-600"
-                    {...fileReg}
-                    onChange={(e) => {
-                      fileReg.onChange(e);
-                      const f = (e.target as HTMLInputElement).files?.[0];
-                      if (f) setImageUrl(URL.createObjectURL(f));
-                    }}
-                  />
-                );
-              })()}
-              <p className="text-sm text-gray-400 flex items-start gap-2">
-                Meta exige un ejemplo válido del medio para aprobar la plantilla.
-                <HelpTooltip title="Ejemplo del header" tooltip="Handle vs URL">
-                  <p>
-                    Intentamos generar un handle subiendo el archivo (requiere App ID y token válidos). Si no es posible, debes proporcionar una URL pública del medio para usarla como preview. El media id de mensajes NO sirve como handle para plantillas.
-                  </p>
-                </HelpTooltip>
-              </p>
+            <div className="text-sm text-gray-400">
+              Meta exige un ejemplo del header como URL pública (https) para aprobar la plantilla.
             </div>
           )}
 
@@ -415,9 +348,9 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
             </div>
           </div>
 
-          {['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue && !(watchedValues.headerFile && watchedValues.headerFile[0]) && (
+          {['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue && (
             <div className="p-3 rounded bg-yellow-900/20 text-yellow-200 text-sm">
-              Debes proporcionar un ejemplo del header: sube un archivo o pega una URL pública (https). Meta lo requiere para aprobar la plantilla.
+              Debes proporcionar un ejemplo del header: pega una URL pública (https). Meta lo requiere para aprobar la plantilla.
             </div>
           )}
 
@@ -429,7 +362,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
               type="submit"
               loading={loading}
               className="flex-1"
-              disabled={['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue && !(watchedValues.headerFile && watchedValues.headerFile[0])}
+              disabled={['IMAGE','VIDEO','DOCUMENT'].includes(watchedValues.headerType as any) && !watchedValues.headerValue}
             >
               Crear Plantilla
             </Button>

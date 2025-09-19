@@ -161,12 +161,11 @@ export function useApi(credentials: ApiCredentials | null) {
       // - Si hay archivo: enviar multipart con `metadata` y `file`
       // - Si no hay archivo: enviar solo `metadata`
       try {
-        const serverForm = new FormData();
-        const hasFile = Boolean(payload.headerMediaFile?.file);
-        // Remover hints locales que el servidor no espera
-        const metadataOnly = { ...payload };
-        if (metadataOnly.headerMediaFile) delete (metadataOnly as any).headerMediaFile;
-        if (metadataOnly.headerMediaUrl) delete (metadataOnly as any).headerMediaUrl;
+  const serverForm = new FormData();
+  const hasFile = Boolean(payload.headerMediaFile?.file);
+  // Remover hints locales que el servidor no espera (conservamos headerMediaUrl para que el server la procese)
+  const metadataOnly = { ...payload };
+  if (metadataOnly.headerMediaFile) delete (metadataOnly as any).headerMediaFile;
         serverForm.append('metadata', JSON.stringify(metadataOnly));
         if (hasFile) {
           const { file } = payload.headerMediaFile as { file: File, format: 'IMAGE'|'VIDEO'|'DOCUMENT' };

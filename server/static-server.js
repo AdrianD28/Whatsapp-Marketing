@@ -151,13 +151,13 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
     const businessAccountId = req.headers['x-business-account-id'] || req.body.businessAccountId || process.env.BUSINESS_ACCOUNT_ID;
     if (!accessToken || !businessAccountId) return res.status(500).json({ error: 'server missing ACCESS_TOKEN or BUSINESS_ACCOUNT_ID env' });
 
-    // Esperamos metadata en body.metadata como JSON string o en campos individuales
+  // Esperamos metadata en body.metadata como JSON string o en campos individuales
     const metadataRaw = req.body.metadata || '{}';
     const metadata = typeof metadataRaw === 'string' ? JSON.parse(metadataRaw) : metadataRaw;
 
     let payload = { ...metadata };
 
-    // Si hay archivo adjunto y es un header MEDIA, intentamos subirlo y agregar example.header_handle
+  // Si hay archivo adjunto y es un header MEDIA, intentamos subirlo y agregar example.header_handle
     if (req.file && payload.components && Array.isArray(payload.components)) {
       const filePath = req.file.path;
   let handle = null;
@@ -197,13 +197,32 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
           return c;
         });
       } else {
-        // fallback: servir URL static y adjuntar preview
-        const publicUrl = `${req.protocol}://${req.get('host')}/static/${encodeURIComponent(req.file.filename)}`;
-        payload.components = payload.components.map((c) => {
-          if (c.type === 'HEADER') return Object.assign({}, c, { example: { header_handle_preview_url: publicUrl } });
-          return c;
-        });
+        return res.status(400).json({ error: 'header_media_example_required', detail: 'No fue posible generar handle desde archivo. Proporciona una URL pública en headerMediaUrl.' });
       }
+    }
+
+    // Si viene headerMediaUrl (URL pública) subirla a /{phone_number_id}/media y usar ese id como header_handle
+    if (payload.headerMediaUrl && payload.components && Array.isArray(payload.components)) {
+      const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
+      if (!phoneNumberId) return res.status(400).json({ error: 'phone_number_id_required' });
+      const url = payload.headerMediaUrl.url;
+      if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'invalid_url' });
+      const form = new FormData();
+      form.append('messaging_product', 'whatsapp');
+      form.append('link', url);
+      const uploadRes = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
+      if (!uploadRes.ok) {
+        const text = await uploadRes.text().catch(() => '');
+        return res.status(500).json({ error: 'media_upload_from_url_failed', detail: text });
+      }
+      const upJson = await uploadRes.json();
+      const mediaId = upJson.id;
+      if (!mediaId) return res.status(500).json({ error: 'no_media_id_returned' });
+      payload.components = payload.components.map((c) => {
+        if (c.type === 'HEADER') return Object.assign({}, c, { example: { header_handle: [mediaId] } });
+        return c;
+      });
+      delete payload.headerMediaUrl;
     }
 
     // Llamar a Graph API para crear la plantilla
