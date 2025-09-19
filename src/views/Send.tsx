@@ -154,6 +154,8 @@ export function Send() {
                     try {
                       const form = new FormData();
                       form.append('file', file, file.name);
+                      if (apiCredentials?.phoneNumberId) form.append('phoneNumberId', apiCredentials.phoneNumberId);
+                      if (apiCredentials?.accessToken) form.append('accessToken', apiCredentials.accessToken);
                       const r = await fetch('/upload-media', {
                         method: 'POST',
                         body: form,
@@ -199,6 +201,8 @@ export function Send() {
                     try {
                       const form = new FormData();
                       form.append('file', file, file.name);
+                      if (apiCredentials?.phoneNumberId) form.append('phoneNumberId', apiCredentials.phoneNumberId);
+                      if (apiCredentials?.accessToken) form.append('accessToken', apiCredentials.accessToken);
                       const r = await fetch('/upload-media', {
                         method: 'POST',
                         body: form,

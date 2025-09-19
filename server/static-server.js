@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { Blob } from 'buffer';
 
 const app = express();
 const port = process.env.PORT || 5174;
@@ -87,20 +88,26 @@ app.post('/resumable-upload', upload.single('file'), async (req, res) => {
 // Proxy upload to /{phone_number_id}/media. Expects headers x-phone-number-id and x-access-token or body fields.
 app.post('/upload-media', upload.single('file'), async (req, res) => {
   try {
-    const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId;
-    const token = req.headers['x-access-token'] || req.body.accessToken;
+    const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
+    const token = req.headers['x-access-token'] || req.body.accessToken || process.env.ACCESS_TOKEN;
     if (!phoneNumberId || !token) return res.status(400).json({ error: 'phoneNumberId and accessToken required' });
     if (!req.file) return res.status(400).json({ error: 'file required' });
 
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
-    form.append('file', fs.createReadStream(req.file.path), req.file.originalname);
+    // Adjuntar como Blob para compatibilidad total con fetch/undici
+    const buffer = await fs.promises.readFile(req.file.path);
+    const mime = req.file.mimetype || 'application/octet-stream';
+    const blob = new Blob([buffer], { type: mime });
+    form.append('file', blob, req.file.originalname);
 
     const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/media`;
     const fetchRes = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
     if (!fetchRes.ok) {
       const text = await fetchRes.text().catch(() => '');
-      return res.status(500).json({ error: 'media upload failed', detail: text });
+      let detail;
+      try { detail = JSON.parse(text); } catch { detail = text; }
+      return res.status(fetchRes.status).json({ error: 'media upload failed', status: fetchRes.status, detail });
     }
     const json = await fetchRes.json();
     return res.json(json);
@@ -112,12 +119,36 @@ app.post('/upload-media', upload.single('file'), async (req, res) => {
 
 app.get('/', (req, res) => res.send('Static upload server running'));
 
+// Health & version endpoints
+app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get('/version', (req, res) => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+    return res.json({ version: pkg.version, time: new Date().toISOString() });
+  } catch {
+    return res.json({ version: 'unknown', time: new Date().toISOString() });
+  }
+});
+
+// Env check (no expone valores, solo si están presentes)
+app.get('/env-check', (req, res) => {
+  const present = (v) => (typeof v === 'string' && v.length > 0);
+  res.json({
+    PORT: present(process.env.PORT),
+    APP_ID: present(process.env.APP_ID),
+    ACCESS_TOKEN: present(process.env.ACCESS_TOKEN),
+    PHONE_NUMBER_ID: present(process.env.PHONE_NUMBER_ID),
+    BUSINESS_ACCOUNT_ID: present(process.env.BUSINESS_ACCOUNT_ID),
+    STATIC_DIR: present(process.env.STATIC_DIR) ? process.env.STATIC_DIR : '(default /app/server/static)'
+  });
+});
+
 // Create template server-side: recibe metadata + file opcional y crea la plantilla en Graph API
 // Requiere en el servidor: BUSINESS_ACCOUNT_ID y ACCESS_TOKEN (en env vars)
 app.post('/create-template', upload.single('file'), async (req, res) => {
   try {
-    const accessToken = process.env.ACCESS_TOKEN;
-    const businessAccountId = process.env.BUSINESS_ACCOUNT_ID;
+    const accessToken = req.headers['x-access-token'] || req.body.accessToken || process.env.ACCESS_TOKEN;
+    const businessAccountId = req.headers['x-business-account-id'] || req.body.businessAccountId || process.env.BUSINESS_ACCOUNT_ID;
     if (!accessToken || !businessAccountId) return res.status(500).json({ error: 'server missing ACCESS_TOKEN or BUSINESS_ACCOUNT_ID env' });
 
     // Esperamos metadata en body.metadata como JSON string o en campos individuales
@@ -132,10 +163,11 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
   let handle = null;
 
       // 1) resumable con APP_ID si está en env
-      if (process.env.APP_ID) {
+      const appId = req.headers['x-app-id'] || req.body.appId || process.env.APP_ID;
+      if (appId) {
         try {
           const stat = await fs.promises.stat(filePath);
-          const initUrl = `https://graph.facebook.com/v19.0/${process.env.APP_ID}/uploads?file_name=${encodeURIComponent(req.file.originalname)}&file_length=${stat.size}&file_type=${encodeURIComponent(req.file.mimetype || 'application/octet-stream')}`;
+          const initUrl = `https://graph.facebook.com/v19.0/${appId}/uploads?file_name=${encodeURIComponent(req.file.originalname)}&file_length=${stat.size}&file_type=${encodeURIComponent(req.file.mimetype || 'application/octet-stream')}`;
           const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}` } });
           if (initRes.ok) {
             const initJson = await initRes.json();
@@ -156,12 +188,13 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
       }
 
       // 2) si no handle, subir a /{phone_number_id}/media si PHONE_NUMBER_ID está en env
-      if (!handle && process.env.PHONE_NUMBER_ID) {
+      const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
+      if (!handle && phoneNumberId) {
         try {
           const form = new FormData();
           form.append('messaging_product', 'whatsapp');
           form.append('file', fs.createReadStream(filePath), req.file.originalname);
-          const url = `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/media`;
+          const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/media`;
           const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
           if (r.ok) {
             const j = await r.json(); if (j?.id) handle = j.id;

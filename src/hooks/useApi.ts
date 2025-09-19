@@ -172,7 +172,21 @@ export function useApi(credentials: ApiCredentials | null) {
           const { file } = payload.headerMediaFile as { file: File, format: 'IMAGE'|'VIDEO'|'DOCUMENT' };
           serverForm.append('file', file, file.name);
         }
-        const serverRes = await fetch('/create-template', { method: 'POST', body: serverForm });
+        // Añadir credenciales como campos para el servidor (multi-tenant)
+        serverForm.append('accessToken', credentials.accessToken);
+        serverForm.append('businessAccountId', credentials.businessAccountId);
+        if (credentials.appId) serverForm.append('appId', credentials.appId);
+        serverForm.append('phoneNumberId', credentials.phoneNumberId);
+        const serverRes = await fetch('/create-template', {
+          method: 'POST',
+          body: serverForm,
+          headers: {
+            'x-access-token': credentials.accessToken,
+            'x-business-account-id': credentials.businessAccountId,
+            ...(credentials.appId ? { 'x-app-id': credentials.appId } : {}),
+            'x-phone-number-id': credentials.phoneNumberId,
+          }
+        });
         if (!serverRes.ok) {
           const txt = await serverRes.text().catch(() => '');
           throw new Error(`Servidor respondió ${serverRes.status}: ${txt}`);
