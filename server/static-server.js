@@ -206,10 +206,22 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
       const phoneNumberId = req.headers['x-phone-number-id'] || req.body.phoneNumberId || process.env.PHONE_NUMBER_ID;
       if (!phoneNumberId) return res.status(400).json({ error: 'phone_number_id_required' });
       const url = payload.headerMediaUrl.url;
+      const fmt = (payload.headerMediaUrl.format || '').toUpperCase();
       if (!/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'invalid_url' });
       const form = new FormData();
       form.append('messaging_product', 'whatsapp');
       form.append('link', url);
+      // Proveer hint de tipo para que Graph no exija 'file' erróneamente
+      const lower = String(url).toLowerCase();
+      let mime = undefined;
+      if (fmt === 'IMAGE') {
+        mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      } else if (fmt === 'VIDEO') {
+        mime = lower.endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+      } else if (fmt === 'DOCUMENT') {
+        mime = lower.endsWith('.pdf') ? 'application/pdf' : lower.endsWith('.doc') ? 'application/msword' : lower.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : lower.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream';
+      }
+      if (mime) form.append('type', mime);
       const uploadRes = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/media`, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, body: form });
       if (!uploadRes.ok) {
         const text = await uploadRes.text().catch(() => '');
