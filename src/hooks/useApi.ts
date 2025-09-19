@@ -2,14 +2,14 @@ import { useState, useCallback } from 'react';
 import { ApiCredentials, Template } from '../types';
 import toast from 'react-hot-toast';
 
-const META_GRAPH_URL = 'https://graph.facebook.com/v19.0/';
+const META_GRAPH_URL = 'https://graph.facebook.com/v22.0/';
 
 export function useApi(credentials: ApiCredentials | null) {
   const resumableUpload = useCallback(async (file: File): Promise<string> => {
     if (!credentials?.appId) throw new Error('Falta App ID para subida reanudable');
     const token = credentials.accessToken;
     console.debug('[useApi] resumableUpload start', { name: file.name, size: file.size, type: file.type });
-    const initUrl = `https://graph.facebook.com/v19.0/${credentials.appId}/uploads?file_name=${encodeURIComponent(file.name)}&file_length=${file.size}&file_type=${encodeURIComponent(file.type || 'application/octet-stream')}`;
+  const initUrl = `https://graph.facebook.com/v22.0/${credentials.appId}/uploads?file_name=${encodeURIComponent(file.name)}&file_length=${file.size}&file_type=${encodeURIComponent(file.type || 'application/octet-stream')}`;
     const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${token}` } });
     if (!initRes.ok) {
       const t = await initRes.text().catch(() => '');
@@ -19,7 +19,7 @@ export function useApi(credentials: ApiCredentials | null) {
     const initJson = await initRes.json();
     console.debug('[useApi] resumableUpload init response', initJson);
     const uploadId = initJson.id as string; // 'upload:<UPLOAD_SESSION_ID>'
-    const uploadUrl = `https://graph.facebook.com/v19.0/${uploadId}`;
+  const uploadUrl = `https://graph.facebook.com/v22.0/${uploadId}`;
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
       headers: { Authorization: `OAuth ${token}`, 'file_offset': '0' },

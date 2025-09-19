@@ -57,7 +57,7 @@ app.post('/resumable-upload', upload.single('file'), async (req, res) => {
     const fileName = req.file.originalname;
     const fileType = req.file.mimetype || 'application/octet-stream';
 
-    const initUrl = `https://graph.facebook.com/v19.0/${appId}/uploads?file_name=${encodeURIComponent(fileName)}&file_length=${fileSize}&file_type=${encodeURIComponent(fileType)}`;
+  const initUrl = `https://graph.facebook.com/v22.0/${appId}/uploads?file_name=${encodeURIComponent(fileName)}&file_length=${fileSize}&file_type=${encodeURIComponent(fileType)}`;
     const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${token}` } });
     if (!initRes.ok) {
       const text = await initRes.text().catch(() => '');
@@ -68,7 +68,7 @@ app.post('/resumable-upload', upload.single('file'), async (req, res) => {
     const uploadId = initJson.id || initJson.upload_session_id;
     if (!uploadId) return res.status(500).json({ error: 'no upload id returned', initJson });
 
-    const uploadUrl = `https://graph.facebook.com/v19.0/${uploadId}`;
+  const uploadUrl = `https://graph.facebook.com/v22.0/${uploadId}`;
     const fileBuffer = await fs.promises.readFile(filePath);
     const uploadRes = await fetch(uploadUrl, {
       method: 'POST',
@@ -104,7 +104,7 @@ app.post('/upload-media', upload.single('file'), async (req, res) => {
     const blob = new Blob([buffer], { type: mime });
     form.append('file', blob, req.file.originalname);
 
-    const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/media`;
+  const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/media`;
     const fetchRes = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
     if (!fetchRes.ok) {
       const text = await fetchRes.text().catch(() => '');
@@ -156,14 +156,14 @@ app.get('/diag/wa', async (req, res) => {
     if (!accessToken) return res.status(400).json({ error: 'access_token_required' });
     const out = {};
     if (phoneNumberId) {
-      const url = `https://graph.facebook.com/v19.0/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,whatsapp_business_account`;
+  const url = `https://graph.facebook.com/v22.0/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,whatsapp_business_account`;
       const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
       out.phoneNumber = { status: r.status, data: await r.json().catch(() => ({})) };
     } else {
       out.phoneNumber = { warning: 'no phoneNumberId provided' };
     }
     if (businessAccountId) {
-      const url2 = `https://graph.facebook.com/v19.0/${businessAccountId}?fields=id,name,verification_status,owned_whatsapp_business_accounts{id,name}`;
+  const url2 = `https://graph.facebook.com/v22.0/${businessAccountId}?fields=id,name,verification_status,owned_whatsapp_business_accounts{id,name}`;
       const r2 = await fetch(url2, { headers: { Authorization: `Bearer ${accessToken}` } });
       out.business = { status: r2.status, data: await r2.json().catch(() => ({})) };
     } else {
@@ -244,13 +244,13 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
       if (appId) {
         try {
           const stat = await fs.promises.stat(filePath);
-          const initUrl = `https://graph.facebook.com/v19.0/${appId}/uploads?file_name=${encodeURIComponent(req.file.originalname)}&file_length=${stat.size}&file_type=${encodeURIComponent(req.file.mimetype || 'application/octet-stream')}`;
+          const initUrl = `https://graph.facebook.com/v22.0/${appId}/uploads?file_name=${encodeURIComponent(req.file.originalname)}&file_length=${stat.size}&file_type=${encodeURIComponent(req.file.mimetype || 'application/octet-stream')}`;
           const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}` } });
           if (initRes.ok) {
             const initJson = await initRes.json();
             const uploadId = initJson.id || initJson.upload_session_id;
             if (uploadId) {
-              const uploadUrl = `https://graph.facebook.com/v19.0/${uploadId}`;
+              const uploadUrl = `https://graph.facebook.com/v22.0/${uploadId}`;
               const buffer = await fs.promises.readFile(filePath);
               const upRes = await fetch(uploadUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}`, file_offset: '0', 'Content-Type': 'application/octet-stream' }, body: buffer });
               if (upRes.ok) {
@@ -310,7 +310,7 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
         if (base) fileName = base;
       } catch {}
       // Iniciar subida reanudable
-      const initUrl = `https://graph.facebook.com/v19.0/${appId}/uploads?file_name=${encodeURIComponent(fileName)}&file_length=${buffer.length}&file_type=${encodeURIComponent(guessed)}`;
+  const initUrl = `https://graph.facebook.com/v22.0/${appId}/uploads?file_name=${encodeURIComponent(fileName)}&file_length=${buffer.length}&file_type=${encodeURIComponent(guessed)}`;
       const initRes = await fetch(initUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}` } });
       if (!initRes.ok) {
         const text = await initRes.text().catch(() => '');
@@ -319,7 +319,7 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
       const initJson = await initRes.json();
       const uploadId = initJson.id || initJson.upload_session_id;
       if (!uploadId) return res.status(500).json({ error: 'no_upload_id_returned', initJson });
-      const uploadUrl = `https://graph.facebook.com/v19.0/${uploadId}`;
+  const uploadUrl = `https://graph.facebook.com/v22.0/${uploadId}`;
       const upRes = await fetch(uploadUrl, { method: 'POST', headers: { Authorization: `OAuth ${accessToken}`, file_offset: '0', 'Content-Type': 'application/octet-stream' }, body: buffer });
       if (!upRes.ok) {
         const text = await upRes.text().catch(() => '');
@@ -336,7 +336,7 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
     }
 
     // Llamar a Graph API para crear la plantilla
-    const createUrl = `https://graph.facebook.com/v19.0/${businessAccountId}/message_templates`;
+  const createUrl = `https://graph.facebook.com/v22.0/${businessAccountId}/message_templates`;
     const resp = await fetch(createUrl, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const jsonResp = await resp.json();
     if (!resp.ok) return res.status(500).json({ error: 'create_template_failed', detail: jsonResp });
