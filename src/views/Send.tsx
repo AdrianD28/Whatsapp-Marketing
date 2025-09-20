@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Send as SendIcon, Play, Pause, Users } from 'lucide-react';
+import { Send as SendIcon, Play, Pause, Users, Settings } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -37,6 +37,37 @@ export function Send() {
   const approvedTemplates = templates.filter(t => t.status === 'APPROVED');
   const selectedTemplateName = watch('templateName');
   const selectedTemplate = templates.find(t => t.name === selectedTemplateName);
+
+  // Campos disponibles desde Contactos (para mapeo)
+  const availableFields = useMemo(() => {
+    const first = contacts[0] || {} as any;
+    return Object.keys(first);
+  }, [contacts]);
+
+  // Mapeo de parámetros por plantilla: keys como 'body:1', 'header:1', 'button:0' -> nombre de campo
+  const MAP_KEY_PREFIX = 'paramMap:';
+  const [paramMap, setParamMap] = useState<Record<string, string>>({});
+  const loadParamMap = (tpl?: string) => {
+    if (!tpl) return {};
+    try { return JSON.parse(localStorage.getItem(MAP_KEY_PREFIX + tpl) || '{}'); } catch { return {}; }
+  };
+  const saveParamMap = (tpl: string, map: Record<string, string>) => {
+    try { localStorage.setItem(MAP_KEY_PREFIX + tpl, JSON.stringify(map)); } catch {}
+  };
+  useEffect(() => {
+    setParamMap(loadParamMap(selectedTemplateName));
+  }, [selectedTemplateName]);
+  const updateMap = (key: string, field: string) => {
+    setParamMap(prev => {
+      const next = { ...prev, [key]: field };
+      if (selectedTemplateName) saveParamMap(selectedTemplateName, next);
+      return next;
+    });
+  };
+  const resetMap = () => {
+    setParamMap({});
+    if (selectedTemplateName) saveParamMap(selectedTemplateName, {});
+  };
 
   // Cache local de media por plantilla: { [templateName]: { id?: string, link?: string } }
   const CACHE_KEY = 'headerMediaByTemplate';
@@ -94,8 +125,8 @@ export function Send() {
     }
 
     // Validar si la plantilla requiere HEADER de tipo IMAGE
-    const headerComponent = selectedTemplate.components.find(c => c.type === 'HEADER');
-    const requiresHeaderImage = headerComponent && (headerComponent as any).format === 'IMAGE';
+  const headerComponent = selectedTemplate.components.find(c => c.type === 'HEADER');
+  const requiresHeaderImage = headerComponent && (headerComponent as any).format === 'IMAGE';
     // Checklist en modo estricto
     if (strictMode && !checklistConfirmed) {
       setPendingData(data);
@@ -143,14 +174,48 @@ export function Send() {
             // Construir parámetros en el formato esperado por la API
             // - Header IMAGE: { type: 'image', image: { link: url } }
             // - Body placeholders: { type: 'text', text: value }
+            // BODY params por placeholders numerados
             const bodyParams = parameters ? 
               parameters.map(p => {
                 const index = p.replace(/\{\{|\}\}/g, '');
-                const value = index === '1' ? contact.Nombre : contact.Numero;
+                const mapKey = `body:${index}`;
+                const field = paramMap[mapKey];
+                const fallback = index === '1' ? 'Nombre' : 'Numero';
+                const key = field || fallback;
+                const value = (contact as any)[key] ?? '';
                 return { type: 'text', text: String(value) } as any;
               }) : [];
 
+            // HEADER TEXT params si la plantilla lo requiere
             const params: any[] = [...bodyParams];
+            if (headerComponent && (headerComponent as any).format === 'TEXT' && (headerComponent as any).text) {
+              const htext = (headerComponent as any).text as string;
+              const hmatches = htext.match(/\{\{(\d+)\}\}/g);
+              if (hmatches && hmatches.length > 0) {
+                for (const m of hmatches) {
+                  const idx = m.replace(/\{\{|\}\}/g, '');
+                  const mapKey = `header:${idx}`;
+                  const field = paramMap[mapKey];
+                  const fallback = idx === '1' ? 'Nombre' : 'Numero';
+                  const key = field || fallback;
+                  const val = (contact as any)[key] ?? '';
+                  params.unshift({ type: 'header-text', text: String(val) });
+                }
+              }
+            }
+
+            // BUTTON URL params si existen (primer valor usa Numero por defecto)
+            const buttonsComp = selectedTemplate.components.find((c: any) => c.type === 'BUTTONS') as any;
+            if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
+              buttonsComp.buttons.forEach((b: any, idx: number) => {
+                if (b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || '')) {
+                  const mapKey = `button:${idx}`;
+                  const field = paramMap[mapKey] || 'Numero';
+                  const value = String((contact as any)[field] ?? '');
+                  params.push({ type: 'button', sub_type: 'url', index: idx, text: value });
+                }
+              });
+            }
             if (requiresHeaderImage) {
               const cached = getTemplateMedia(selectedTemplate.name);
               if (strictMode) {
@@ -369,6 +434,98 @@ export function Send() {
               </select>
               {errors.templateName && (
                 <p className="text-sm text-red-400 mt-1">{errors.templateName.message}</p>
+              )}
+              {/* Mapeo de parámetros */}
+              {selectedTemplate && (
+                <div className="mt-4 p-3 rounded bg-gray-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-gray-300" />
+                      <span className="text-sm text-gray-200 font-medium">Mapeo de placeholders</span>
+                    </div>
+                    <Button type="button" variant="secondary" onClick={resetMap}>Restablecer</Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    {/* BODY */}
+                    <div>
+                      <div className="text-gray-300 mb-1">Body</div>
+                      {(() => {
+                        const bodyComp = selectedTemplate.components.find((c: any) => c.type === 'BODY') as any;
+                        const bodyPlaceholders = (bodyComp?.text || '').match(/\{\{(\d+)\}\}/g) || [];
+                        if (bodyPlaceholders.length === 0) return <div className="text-gray-500">Sin variables</div>;
+                        return (
+                          <div className="space-y-2">
+                            {bodyPlaceholders.map((ph: string) => {
+                              const idx = ph.replace(/\{\{|\}\}/g, '');
+                              const key = `body:${idx}`;
+                              return (
+                                <div key={key} className="flex items-center gap-2">
+                                  <span className="text-gray-400">{`{{${idx}}}`}</span>
+                                  <select value={paramMap[key] || ''} onChange={e => updateMap(key, e.target.value)} className="flex-1 rounded border-gray-600 bg-gray-700 text-white">
+                                    <option value="">(Por defecto)</option>
+                                    {availableFields.map(f => <option key={f} value={f}>{f}</option>)}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* HEADER */}
+                    <div>
+                      <div className="text-gray-300 mb-1">Header</div>
+                      {(() => {
+                        const headerComp = selectedTemplate.components.find((c: any) => c.type === 'HEADER') as any;
+                        if (!headerComp || headerComp.format !== 'TEXT') return <div className="text-gray-500">Sin variables o no TEXT</div>;
+                        const hPlaceholders = (headerComp.text || '').match(/\{\{(\d+)\}\}/g) || [];
+                        if (hPlaceholders.length === 0) return <div className="text-gray-500">Sin variables</div>;
+                        return (
+                          <div className="space-y-2">
+                            {hPlaceholders.map((ph: string) => {
+                              const idx = ph.replace(/\{\{|\}\}/g, '');
+                              const key = `header:${idx}`;
+                              return (
+                                <div key={key} className="flex items-center gap-2">
+                                  <span className="text-gray-400">{`{{${idx}}}`}</span>
+                                  <select value={paramMap[key] || ''} onChange={e => updateMap(key, e.target.value)} className="flex-1 rounded border-gray-600 bg-gray-700 text-white">
+                                    <option value="">(Por defecto)</option>
+                                    {availableFields.map(f => <option key={f} value={f}>{f}</option>)}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* BUTTONS */}
+                    <div>
+                      <div className="text-gray-300 mb-1">Botones URL</div>
+                      {(() => {
+                        const buttonsComp = selectedTemplate.components.find((c: any) => c.type === 'BUTTONS') as any;
+                        const urlButtons = (buttonsComp?.buttons || []).map((btn: any, i: number) => ({ b: btn, i })).filter((x: any) => x.b.type === 'URL' && /\{\{\d+\}\}/.test(x.b.url || ''));
+                        if (urlButtons.length === 0) return <div className="text-gray-500">Sin variables</div>;
+                        return (
+                          <div className="space-y-2">
+                            {urlButtons.map((x: any) => {
+                              const key = `button:${x.i}`;
+                              return (
+                                <div key={key} className="flex items-center gap-2">
+                                  <span className="text-gray-400">Btn {x.i + 1}</span>
+                                  <select value={paramMap[key] || ''} onChange={e => updateMap(key, e.target.value)} className="flex-1 rounded border-gray-600 bg-gray-700 text-white">
+                                    <option value="">(Por defecto: Numero)</option>
+                                    {availableFields.map(f => <option key={f} value={f}>{f}</option>)}
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
 

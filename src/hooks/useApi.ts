@@ -268,25 +268,28 @@ export function useApi(credentials: ApiCredentials | null) {
   // Soporta parameters para body o header image.
   // Formato esperado: { type:'image'|'text', image?:{link?:string,id?:string}, text?:string }
     if (Array.isArray(parameters) && parameters.length > 0) {
-      // agrupar por tipo: si existe object with type 'image' lo ponemos en header parameters
       const headerParams: any[] = [];
       const bodyParams: any[] = [];
+      const buttonComps: any[] = [];
       for (const p of parameters) {
         if (p?.type === 'image' && (p.image?.link || p.image?.id)) {
           const img: any = {};
           if (p.image.link) img.link = p.image.link;
           if (p.image.id) img.id = p.image.id;
           headerParams.push({ type: 'image', image: img });
+        } else if (p?.type === 'header-text' && typeof p.text === 'string') {
+          headerParams.push({ type: 'text', text: p.text });
         } else if (p?.type === 'text' && typeof p.text === 'string') {
           bodyParams.push({ type: 'text', text: p.text });
+        } else if (p?.type === 'button' && p.sub_type === 'url' && (p.text || (p.parameters && p.parameters[0]?.text))) {
+          const index = String(p.index ?? 0);
+          const paramText = p.text ?? p.parameters[0]?.text;
+          buttonComps.push({ type: 'button', sub_type: 'url', index, parameters: [{ type: 'text', text: paramText }] });
         }
       }
-      if (headerParams.length > 0) {
-        templateObj.components.push({ type: 'header', parameters: headerParams });
-      }
-      if (bodyParams.length > 0) {
-        templateObj.components.push({ type: 'body', parameters: bodyParams });
-      }
+      if (headerParams.length > 0) templateObj.components.push({ type: 'header', parameters: headerParams });
+      if (bodyParams.length > 0) templateObj.components.push({ type: 'body', parameters: bodyParams });
+      for (const b of buttonComps) templateObj.components.push(b);
     }
 
     const messagePayload = {
