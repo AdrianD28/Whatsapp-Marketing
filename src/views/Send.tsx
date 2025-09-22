@@ -28,7 +28,7 @@ export function Send() {
   const [checkCoherence, setCheckCoherence] = useState(false);
   const [checkFrequency, setCheckFrequency] = useState(false);
   const [pendingData, setPendingData] = useState<SendFormData | null>(null);
-  const { templates, contacts, sendProgress, setSendProgress, apiCredentials, addActivity } = useAppContext();
+  const { templates, contacts, sendProgress, setSendProgress, apiCredentials, addActivity, addSendSession } = useAppContext();
   const { sendMessage } = useApi(apiCredentials);
   const { register, handleSubmit, watch, formState: { errors } } = useForm<SendFormData>({
     defaultValues: { delay: 5 }
@@ -369,6 +369,20 @@ export function Send() {
   setPendingData(null);
   // Limpiar cache de media al finalizar el envío
   try { localStorage.removeItem(CACHE_KEY); } catch {}
+  // Registrar sesión de envío para reportes
+  try {
+    if (selectedTemplate) {
+      const bodyComp = selectedTemplate.components.find((c: any) => c.type === 'BODY') as any;
+      addSendSession({
+        templateName: selectedTemplate.name,
+        templateCategory: selectedTemplate.category,
+        templateBody: bodyComp?.text || '',
+        total: contacts.length,
+        success: successCount,
+        reached: successCount,
+      });
+    }
+  } catch {}
     
     addActivity({
       title: 'Envío completado',

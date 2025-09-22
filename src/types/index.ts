@@ -43,10 +43,22 @@ export interface Activity {
   timestamp: Date;
 }
 
+export interface SendSession {
+  id: string;
+  templateName: string;
+  templateCategory?: string;
+  templateBody?: string;
+  timestamp: string; // ISO
+  total: number;
+  success: number;
+  reached: number; // normalmente igual a success
+}
+
 export interface AppState {
   templates: Template[];
   contacts: Contact[];
   sendProgress: SendProgress;
   activities: Activity[];
   apiCredentials: ApiCredentials | null;
+  sendHistory: SendSession[];
 }

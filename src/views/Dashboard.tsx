@@ -1,12 +1,30 @@
-import React from 'react';
+// React imported implicitly by JSX runtime
 import { motion } from 'framer-motion';
-import { FileText, CheckCircle, Clock, Users } from 'lucide-react';
+import { FileText, CheckCircle, Clock, Users, Download } from 'lucide-react';
 import { StatsCard } from '../components/dashboard/StatsCard';
 import { ActivityFeed } from '../components/dashboard/ActivityFeed';
 import { useAppContext } from '../context/AppContext';
+import * as XLSX from 'xlsx';
+import { Button } from '../components/ui/Button';
 
 export function Dashboard() {
-  const { templates, contacts, activities } = useAppContext();
+  const { templates, contacts, activities, sendHistory } = useAppContext();
+
+  const exportReport = () => {
+    const rows = sendHistory.map(s => ({
+      Fecha: new Date(s.timestamp).toLocaleString(),
+      Plantilla: s.templateName,
+      Categoria: s.templateCategory || '',
+      Cuerpo: s.templateBody || '',
+      Enviados: s.total,
+      Exitosos: s.success,
+      Alcanzados: s.reached,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Reporte');
+    XLSX.writeFile(wb, 'reporte_whatsapp.xlsx');
+  };
 
   const stats = {
     totalTemplates: templates.length,
@@ -50,6 +68,10 @@ export function Dashboard() {
       </div>
 
       {/* Activity Feed */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-white text-lg font-semibold">Actividad reciente</h3>
+        <Button type="button" onClick={exportReport} icon={Download}>Descargar Reporte</Button>
+      </div>
       <ActivityFeed activities={activities} />
     </motion.div>
   );
