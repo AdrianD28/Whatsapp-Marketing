@@ -4,7 +4,6 @@ import { AppProvider, useAppContext } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { CredentialsModal } from './components/auth/CredentialsModal';
-import { LoadingSpinner } from './components/ui/LoadingSpinner';
 import { Dashboard } from './views/Dashboard';
 import { Templates } from './views/Templates';
 import { Contacts } from './views/Contacts';
@@ -25,11 +24,13 @@ function AppContent() {
   const { fetchTemplates, loading } = useApi(apiCredentials);
 
   useEffect(() => {
+    // Si no hay credenciales mostramos el modal al primer render
     if (!apiCredentials) {
       setShowCredentialsModal(true);
-    } else {
-      loadInitialData();
+      return;
     }
+    // Intentar cargar solo si hay credenciales
+    loadInitialData();
   }, [apiCredentials]);
 
   const loadInitialData = async () => {
@@ -44,11 +45,23 @@ function AppContent() {
         type: 'success',
       });
     } catch (error) {
-      addActivity({
-        title: 'Error al cargar datos',
-        description: error instanceof Error ? error.message : 'Error desconocido',
-        type: 'error',
-      });
+      // Si el error es expiración de token limpiamos sesión silenciosamente y reabrimos modal
+      if ((error as any)?.authExpired) {
+        setApiCredentials(null);
+        setTemplates([]);
+        setShowCredentialsModal(true);
+        addActivity({
+          title: 'Sesión expirada',
+          description: 'Vuelve a introducir tus credenciales',
+          type: 'info',
+        });
+      } else {
+        addActivity({
+          title: 'Error al cargar datos',
+          description: error instanceof Error ? error.message : 'Error desconocido',
+          type: 'error',
+        });
+      }
     }
   };
 
@@ -114,14 +127,18 @@ function AppContent() {
         <main className="flex-1 overflow-y-auto p-8">
           {!apiCredentials ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <LoadingSpinner size="lg" className="mx-auto mb-4" />
-                <p className="text-gray-400">Configurando credenciales...</p>
+              <div className="text-center space-y-4">
+                <p className="text-gray-300 text-lg font-medium">Bienvenido 👋</p>
+                <p className="text-gray-400 max-w-md">Para comenzar introduce tus credenciales de Meta (Access Token, Phone Number ID y Business Account ID). Tus datos solo se guardan localmente.</p>
+                <button
+                  onClick={() => setShowCredentialsModal(true)}
+                  className="inline-flex items-center px-6 py-3 rounded-md bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors shadow-lg shadow-green-600/20 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-gray-900"
+                >
+                  Configurar Credenciales
+                </button>
               </div>
             </div>
-          ) : (
-            renderView()
-          )}
+          ) : renderView()}
         </main>
       </div>
 

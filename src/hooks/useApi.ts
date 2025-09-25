@@ -91,6 +91,11 @@ export function useApi(credentials: ApiCredentials | null) {
       return data.data || [];
     } catch (error) {
       console.error('Error fetching templates:', error);
+      // Si el token expiró no mostramos toast aquí; dejamos que la capa superior fuerce re-login sin ruido.
+      if ((error as any)?.authExpired) {
+        console.warn('[useApi] Token expirado detectado en fetchTemplates');
+        throw error; // Propagar para que App.tsx maneje logout silencioso
+      }
       toast.error(`Error al cargar plantillas: ${error instanceof Error ? error.message : 'Error desconocido'}`);
       return [];
     } finally {

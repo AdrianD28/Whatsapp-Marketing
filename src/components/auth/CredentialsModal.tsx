@@ -44,7 +44,7 @@ export function CredentialsModal({ isOpen, onSave, onClose, initialCredentials }
           </ul>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           <Input
             label="Access Token"
             icon={Key}
@@ -80,8 +80,6 @@ export function CredentialsModal({ isOpen, onSave, onClose, initialCredentials }
             error={errors.businessAccountId?.message}
             helperText="ID de tu cuenta de WhatsApp Business"
           />
-
-          <div className="flex justify-end pt-4">
           <Input
             label="App ID (para subida reanudable)"
             placeholder="123456789012345"
@@ -89,12 +87,12 @@ export function CredentialsModal({ isOpen, onSave, onClose, initialCredentials }
             helperText="Opcional. Necesario si usas header_handle con subida reanudable."
           />
 
-          <div className="h-2" />
+          <div className="pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
             <Button
               type="submit"
               loading={isSubmitting}
-              size="lg"
-              className="w-full sm:w-auto"
+              size="sm"
+              className="px-6 py-2 rounded-md font-semibold bg-green-600 hover:bg-green-500 shadow shadow-green-600/30 w-full sm:w-auto"
             >
               Guardar Credenciales
             </Button>
