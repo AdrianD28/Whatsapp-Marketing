@@ -358,12 +358,15 @@ app.get('/api/meta/templates', async (req, res) => {
     params.set('fields', 'name,status,category,language,components');
     params.set('limit', String(limit));
     if (after) params.set('after', after);
+    // Pasar el token como query param para evitar variaciones en encabezados (compatibilidad máxima)
+    params.set('access_token', String(accessToken));
     const url = `https://graph.facebook.com/v22.0/${businessAccountId}/message_templates?${params.toString()}`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const r = await fetch(url);
     const text = await r.text();
     let json;
     try { json = JSON.parse(text); } catch { json = text; }
     if (!r.ok) {
+      console.warn('/api/meta/templates graph_error', { status: r.status, json });
       return res.status(r.status).json({ error: 'graph_error', status: r.status, detail: json });
     }
     return res.json(json);
