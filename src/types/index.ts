@@ -21,6 +21,11 @@ export interface Contact {
   email?: string;
 }
 
+export interface ContactList {
+  _id?: string;
+  name: string;
+}
+
 export interface ApiCredentials {
   accessToken: string;
   phoneNumberId: string;
@@ -57,6 +62,7 @@ export interface SendSession {
 export interface AppState {
   templates: Template[];
   contacts: Contact[];
+  lists: ContactList[];
   sendProgress: SendProgress;
   activities: Activity[];
   apiCredentials: ApiCredentials | null;

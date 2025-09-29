@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { AppState, Template, Contact, Activity, ApiCredentials, SendProgress, SendSession } from '../types';
+import { AppState, Template, Contact, Activity, ApiCredentials, SendProgress, SendSession, ContactList } from '../types';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useDbApi } from '../hooks/useDbApi';
 
 interface AppContextType extends AppState {
   setTemplates: (templates: Template[]) => void;
   setContacts: (contacts: Contact[]) => void;
+  setLists: (lists: ContactList[]) => void;
   setApiCredentials: (credentials: ApiCredentials | null) => void;
   setSendProgress: (progress: SendProgress) => void;
   addActivity: (activity: Omit<Activity, 'id' | 'timestamp'>) => void;
@@ -18,6 +20,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 type AppAction = 
   | { type: 'SET_TEMPLATES'; payload: Template[] }
   | { type: 'SET_CONTACTS'; payload: Contact[] }
+  | { type: 'SET_LISTS'; payload: ContactList[] }
   | { type: 'SET_API_CREDENTIALS'; payload: ApiCredentials | null }
   | { type: 'SET_SEND_PROGRESS'; payload: SendProgress }
   | { type: 'ADD_ACTIVITY'; payload: Activity }
@@ -31,6 +34,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, templates: action.payload };
     case 'SET_CONTACTS':
       return { ...state, contacts: action.payload };
+    case 'SET_LISTS':
+      return { ...state, lists: action.payload };
     case 'SET_API_CREDENTIALS':
       return { ...state, apiCredentials: action.payload };
     case 'SET_SEND_PROGRESS':
@@ -53,10 +58,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [apiCredentials, setStoredApiCredentials] = useLocalStorage<ApiCredentials | null>('apiCredentials', null);
+  const db = useDbApi(apiCredentials);
   
   const initialState: AppState = {
     templates: [],
     contacts: [],
+    lists: [],
     sendProgress: { total: 0, sent: 0, percentage: 0, isActive: false },
     activities: [],
     apiCredentials,
@@ -76,6 +83,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setContacts = (contacts: Contact[]) => {
     dispatch({ type: 'SET_CONTACTS', payload: contacts });
   };
+  const setLists = (lists: ContactList[]) => {
+    dispatch({ type: 'SET_LISTS', payload: lists });
+  };
 
   const setApiCredentials = (credentials: ApiCredentials | null) => {
     setStoredApiCredentials(credentials);
@@ -93,6 +103,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       timestamp: new Date(),
     };
     dispatch({ type: 'ADD_ACTIVITY', payload: newActivity });
+    // Persistencia no bloqueante
+    try { db.logActivity(activity as any); } catch {}
   };
 
   const clearActivities = () => {
@@ -125,6 +137,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       timestamp: new Date().toISOString(),
     };
     dispatch({ type: 'ADD_SEND_SESSION', payload });
+    try { db.persistSession(session as any); } catch {}
   };
   const clearSendHistory = () => dispatch({ type: 'CLEAR_SEND_HISTORY' });
 
@@ -133,6 +146,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...state,
       setTemplates,
       setContacts,
+  setLists,
       setApiCredentials,
       setSendProgress,
       addActivity,

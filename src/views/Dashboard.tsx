@@ -6,9 +6,33 @@ import { ActivityFeed } from '../components/dashboard/ActivityFeed';
 import { useAppContext } from '../context/AppContext';
 import * as XLSX from 'xlsx';
 import { Button } from '../components/ui/Button';
+import { useEffect } from 'react';
+import { useDbApi } from '../hooks/useDbApi';
 
 export function Dashboard() {
-  const { templates, contacts, activities, sendHistory } = useAppContext();
+  const { templates, contacts, activities, sendHistory, apiCredentials, clearSendHistory, addSendSession } = useAppContext();
+  const db = useDbApi(apiCredentials);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const persisted = await db.loadSessions();
+        if (Array.isArray(persisted)) {
+          clearSendHistory();
+          persisted.forEach((s: any) => addSendSession({
+            templateName: s.templateName,
+            templateCategory: s.templateCategory,
+            templateBody: s.templateBody,
+            total: s.total,
+            success: s.success,
+            reached: s.reached,
+          }));
+        }
+      } catch {}
+    };
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiCredentials]);
 
   const exportReport = () => {
     const rows = sendHistory.map(s => ({

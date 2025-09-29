@@ -1,18 +1,60 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Upload, Download, Users, FileSpreadsheet } from 'lucide-react';
+import { Upload, Download, Users, FileSpreadsheet, Plus, Trash2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { useAppContext } from '../context/AppContext';
 import { Contact } from '../types';
+import { useDbApi } from '../hooks/useDbApi';
 import toast from 'react-hot-toast';
 
 export function Contacts() {
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [selectedList, setSelectedList] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { contacts, setContacts, addActivity } = useAppContext();
+  const { contacts, setContacts, addActivity, apiCredentials, lists, setLists } = useAppContext();
+  const db = useDbApi(apiCredentials);
+  const [creatingList, setCreatingList] = useState(false);
+  const [newListName, setNewListName] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const ls = await db.getLists();
+        setLists(ls);
+        if (ls[0]) setSelectedList(ls[0]._id);
+        if (ls[0]) {
+          const cs = await db.getContacts(ls[0]._id);
+          setContacts(cs.map((c: any) => ({ Nombre: c.nombre, Numero: c.numero, email: c.email })));
+        }
+      } catch {}
+    };
+    init();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiCredentials]);
+
+  const refreshContactsFor = async (listId: string) => {
+    try {
+      const refreshed = await db.getContacts(listId);
+      setContacts(refreshed.map((c: any) => ({ Nombre: c.nombre, Numero: c.numero, email: c.email })));
+    } catch {}
+  };
+
+  const refreshLists = async (keepSelection = false) => {
+    try {
+      const ls = await db.getLists();
+      setLists(ls);
+      if (!keepSelection) {
+        setSelectedList(ls[0]?._id || '');
+        if (ls[0]?._id) await refreshContactsFor(ls[0]._id);
+        else setContacts([]);
+      }
+    } catch {}
+  };
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -93,7 +135,20 @@ export function Contacts() {
         })
         .filter(contact => contact.Numero);
 
-      setContacts(contactsData);
+      // Persistir en lista seleccionada; crear lista por defecto si no hay
+      let targetList = selectedList;
+      try {
+        if (!targetList) {
+          const created = await db.createList('General');
+          setLists([created, ...lists]);
+          targetList = created._id;
+          setSelectedList(targetList);
+        }
+        await db.uploadContactsToList(targetList, contactsData);
+        await refreshContactsFor(targetList);
+      } catch (e) {
+        console.error(e);
+      }
       toast.success(`${contactsData.length} contactos cargados exitosamente`);
       
       addActivity({
@@ -132,7 +187,118 @@ export function Contacts() {
           <h2 className="text-2xl font-bold text-white">Gestión de Contactos</h2>
           <p className="text-gray-400 mt-1">Administra tu lista de contactos</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          <div>
+            <label className="block text-xs text-gray-400">Lista</label>
+            <select value={selectedList} onChange={async (e) => {
+              const id = e.target.value; setSelectedList(id);
+              try {
+                await refreshContactsFor(id);
+              } catch {}
+            }} className="rounded bg-gray-700 text-white border-gray-600">
+              <option value="">(crear General)</option>
+              {lists.map((l: any) => <option key={l._id} value={l._id}>{l.name}</option>)}
+            </select>
+          </div>
+          <div className="flex items-end gap-2 pb-0.5">
+            {!creatingList ? (
+              <Button variant="secondary" icon={Plus} onClick={() => setCreatingList(true)}>
+                Nueva lista
+              </Button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  placeholder="Nombre de la lista"
+                  className="rounded bg-gray-700 text-white border border-gray-600 px-2 py-1 text-sm"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    const name = newListName.trim();
+                    if (!name) { toast.error('Ingresa un nombre'); return; }
+                    try {
+                      const created = await db.createList(name);
+                      setNewListName('');
+                      setCreatingList(false);
+                      await refreshLists();
+                      setSelectedList(created._id);
+                      await refreshContactsFor(created._id);
+                      toast.success('Lista creada');
+                    } catch (e: any) {
+                      toast.error('No se pudo crear la lista');
+                    }
+                  }}
+                >
+                  Guardar
+                </Button>
+                <Button variant="ghost" onClick={() => { setCreatingList(false); setNewListName(''); }}>Cancelar</Button>
+              </div>
+            )}
+            {!!selectedList && !renaming && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const listObj: any = lists.find((l: any) => l._id === selectedList);
+                  setRenameValue(listObj?.name || '');
+                  setRenaming(true);
+                }}
+              >
+                Renombrar
+              </Button>
+            )}
+            {!!selectedList && renaming && (
+              <div className="flex items-center gap-2">
+                <input
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  placeholder="Nuevo nombre"
+                  className="rounded bg-gray-700 text-white border border-gray-600 px-2 py-1 text-sm"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    const name = renameValue.trim();
+                    if (!name) { toast.error('Ingresa un nombre'); return; }
+                    try {
+                      await db.renameList(selectedList, name);
+                      toast.success('Lista renombrada');
+                      setRenaming(false);
+                      setRenameValue('');
+                      await refreshLists(true);
+                    } catch (e) {
+                      toast.error('No se pudo renombrar');
+                    }
+                  }}
+                >
+                  Guardar
+                </Button>
+                <Button variant="ghost" onClick={() => { setRenaming(false); setRenameValue(''); }}>Cancelar</Button>
+              </div>
+            )}
+            {!!selectedList && (
+              <Button
+                variant="ghost"
+                icon={Trash2}
+                onClick={async () => {
+                  const listObj: any = lists.find((l: any) => l._id === selectedList);
+                  const name = listObj?.name || '';
+                  const confirmDelete = window.confirm(`¿Eliminar la lista "${name}" y sus contactos?`);
+                  if (!confirmDelete) return;
+                  try {
+                    await db.deleteList(selectedList);
+                    toast.success('Lista eliminada');
+                    await refreshLists();
+                  } catch (e) {
+                    toast.error('No se pudo eliminar la lista');
+                  }
+                }}
+              >
+                Eliminar
+              </Button>
+            )}
+          </div>
           <Button
             variant="secondary"
             icon={Download}

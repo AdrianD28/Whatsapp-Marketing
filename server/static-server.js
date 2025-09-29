@@ -1,8 +1,12 @@
+import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { Blob } from 'buffer';
+import { getDb, getAccountKeyFromReq, ObjectId } from './db.js';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 const app = express();
 const port = process.env.PORT || 5174;
@@ -22,7 +26,24 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // JSON body for webhooks/APIs
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
+
+// Security headers
+app.use(helmet({
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+}));
+
+// Trust proxy if behind reverse proxy (e.g., EasyPanel/NGINX)
+app.set('trust proxy', 1);
+
+// Rate limiting
+const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const maxReq = Number(process.env.RATE_LIMIT_MAX || 300);
+const apiLimiter = rateLimit({ windowMs, max: maxReq, standardHeaders: true, legacyHeaders: false });
+const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 2000, standardHeaders: true, legacyHeaders: false });
+app.use('/api', apiLimiter);
+app.use('/webhook', webhookLimiter);
 
 app.use('/static', express.static(staticDir));
 
@@ -145,6 +166,155 @@ app.get('/env-check', (req, res) => {
     WEBHOOK_VERIFY_TOKEN: present(process.env.WEBHOOK_VERIFY_TOKEN),
     STATIC_DIR: present(process.env.STATIC_DIR) ? process.env.STATIC_DIR : '(default /app/server/static)'
   });
+});
+
+// --- MongoDB-backed API ---
+app.get('/api/health', async (req, res) => {
+  try {
+    const db = await getDb();
+    const ok = await db.command({ ping: 1 });
+    res.json({ ok: true, mongo: ok.ok === 1 });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: 'db_unavailable' });
+  }
+});
+
+// Middleware de cuenta
+function requireAccount(req, res, next) {
+  const key = getAccountKeyFromReq(req);
+  if (!key) return res.status(400).json({ error: 'account_key_required', hint: 'envía X-Account-Key' });
+  req.accountKey = String(key);
+  next();
+}
+
+function isValidObjectId(id) {
+  try { new ObjectId(id); return true; } catch { return false; }
+}
+
+// Listas de contactos
+app.get('/api/lists', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const lists = await db.collection('lists').find({ accountKey: req.accountKey }).sort({ createdAt: -1 }).toArray();
+  res.json(lists);
+});
+app.post('/api/lists', requireAccount, async (req, res) => {
+  const db = await getDb();
+  let { name } = req.body || {};
+  if (typeof name !== 'string') return res.status(400).json({ error: 'name_required' });
+  name = name.trim();
+  if (!name || name.length > 100) return res.status(400).json({ error: 'invalid_name' });
+  const doc = { accountKey: req.accountKey, name, createdAt: new Date().toISOString() };
+  try {
+    const r = await db.collection('lists').insertOne(doc);
+    res.json({ ...doc, _id: r.insertedId });
+  } catch (e) {
+    if (/E11000/.test(String(e))) return res.status(409).json({ error: 'duplicate', message: 'Ya existe una lista con ese nombre' });
+    res.status(500).json({ error: 'insert_failed' });
+  }
+});
+app.patch('/api/lists/:id', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const id = req.params.id;
+  if (!isValidObjectId(id)) return res.status(400).json({ error: 'invalid_id' });
+  let { name } = req.body || {};
+  if (typeof name !== 'string') return res.status(400).json({ error: 'name_required' });
+  name = name.trim();
+  if (!name || name.length > 100) return res.status(400).json({ error: 'invalid_name' });
+  try {
+    const r = await db.collection('lists').updateOne({ _id: new ObjectId(id), accountKey: req.accountKey }, { $set: { name, updatedAt: new Date().toISOString() } });
+    if (r.matchedCount === 0) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (e) {
+    if (/E11000/.test(String(e))) return res.status(409).json({ error: 'duplicate', message: 'Ya existe una lista con ese nombre' });
+    res.status(500).json({ error: 'update_failed' });
+  }
+});
+app.delete('/api/lists/:id', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const id = req.params.id;
+  if (!isValidObjectId(id)) return res.status(400).json({ error: 'invalid_id' });
+  await db.collection('contacts').deleteMany({ accountKey: req.accountKey, listId: id });
+  await db.collection('lists').deleteOne({ _id: new ObjectId(id), accountKey: req.accountKey });
+  res.json({ ok: true });
+});
+
+// Contactos
+app.get('/api/contacts', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const { listId } = req.query;
+  const filter = { accountKey: req.accountKey };
+  if (listId) filter.listId = String(listId);
+  const contacts = await db.collection('contacts').find(filter).sort({ createdAt: -1 }).limit(5000).toArray();
+  res.json(contacts);
+});
+app.post('/api/contacts/bulk', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const { listId, contacts } = req.body || {};
+  if (!listId) return res.status(400).json({ error: 'listId_required' });
+  if (!Array.isArray(contacts)) return res.status(400).json({ error: 'contacts_array_required' });
+  if (contacts.length > 10000) return res.status(400).json({ error: 'too_many_contacts' });
+  const seen = new Set();
+  const docs = contacts.map(c => ({
+    accountKey: req.accountKey,
+    listId: String(listId),
+    nombre: String(c.Nombre ?? c.nombre ?? '').trim().slice(0, 120),
+    numero: String((c.Numero ?? c.numero ?? '')).replace(/\D+/g, '').slice(0, 32),
+    email: (c.email || c.Email) ? String(c.email || c.Email).trim().slice(0, 254) : undefined,
+    createdAt: new Date().toISOString(),
+  })).filter(d => d.numero && !seen.has(d.numero) && seen.add(d.numero));
+  if (!docs.length) return res.status(400).json({ error: 'no_valid_contacts' });
+  await db.collection('contacts').insertMany(docs, { ordered: false });
+  res.json({ inserted: docs.length });
+});
+app.delete('/api/contacts', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const { listId } = req.query;
+  if (!listId) return res.status(400).json({ error: 'listId_required' });
+  const r = await db.collection('contacts').deleteMany({ accountKey: req.accountKey, listId: String(listId) });
+  res.json({ deleted: r.deletedCount });
+});
+
+// Actividades
+app.get('/api/activities', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const items = await db.collection('activities').find({ accountKey: req.accountKey }).sort({ timestamp: -1 }).limit(100).toArray();
+  res.json(items);
+});
+app.post('/api/activities', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const a = req.body || {};
+  const doc = {
+    accountKey: req.accountKey,
+    title: a.title,
+    description: a.description,
+    type: a.type || 'info',
+    timestamp: new Date().toISOString(),
+  };
+  await db.collection('activities').insertOne(doc);
+  res.json(doc);
+});
+
+// Sesiones de envío (resumen)
+app.get('/api/sessions', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const docs = await db.collection('sessions').find({ accountKey: req.accountKey }).sort({ timestamp: -1 }).limit(200).toArray();
+  res.json(docs);
+});
+app.post('/api/sessions', requireAccount, async (req, res) => {
+  const db = await getDb();
+  const s = req.body || {};
+  const doc = {
+    accountKey: req.accountKey,
+    templateName: s.templateName,
+    templateCategory: s.templateCategory,
+    templateBody: s.templateBody,
+    timestamp: new Date().toISOString(),
+    total: s.total || 0,
+    success: s.success || 0,
+    reached: s.reached || 0,
+  };
+  await db.collection('sessions').insertOne(doc);
+  res.json(doc);
 });
 
 // Diagnostics: Verify WA token + assets
