@@ -182,27 +182,27 @@ export function Contacts() {
       className="space-y-6"
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Gestión de Contactos</h2>
-          <p className="text-gray-400 mt-1">Administra tu lista de contactos</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Gestión de Contactos</h2>
+          <p className="text-gray-400 mt-1 text-sm">Administra tu lista de contactos</p>
         </div>
-        <div className="flex gap-3 items-center">
-          <div>
+        <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
+          <div className="min-w-[180px]">
             <label className="block text-xs text-gray-400">Lista</label>
             <select value={selectedList} onChange={async (e) => {
               const id = e.target.value; setSelectedList(id);
               try {
                 await refreshContactsFor(id);
               } catch {}
-            }} className="rounded bg-gray-700 text-white border-gray-600">
+            }} className="w-full rounded bg-gray-700 text-white border-gray-600 px-2 py-1.5 text-sm">
               <option value="">(crear General)</option>
               {lists.map((l: any) => <option key={l._id} value={l._id}>{l.name}</option>)}
             </select>
           </div>
-          <div className="flex items-end gap-2 pb-0.5">
+          <div className="flex items-end gap-2 pb-0.5 flex-wrap">
             {!creatingList ? (
-              <Button variant="secondary" icon={Plus} onClick={() => setCreatingList(true)}>
+              <Button variant="secondary" size="sm" icon={Plus} onClick={() => setCreatingList(true)}>
                 Nueva lista
               </Button>
             ) : (
@@ -214,7 +214,7 @@ export function Contacts() {
                   className="rounded bg-gray-700 text-white border border-gray-600 px-2 py-1 text-sm"
                 />
                 <Button
-                  variant="secondary"
+                  variant="secondary" size="sm"
                   onClick={async () => {
                     const name = newListName.trim();
                     if (!name) { toast.error('Ingresa un nombre'); return; }
@@ -233,12 +233,12 @@ export function Contacts() {
                 >
                   Guardar
                 </Button>
-                <Button variant="ghost" onClick={() => { setCreatingList(false); setNewListName(''); }}>Cancelar</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setCreatingList(false); setNewListName(''); }}>Cancelar</Button>
               </div>
             )}
             {!!selectedList && !renaming && (
               <Button
-                variant="secondary"
+                variant="secondary" size="sm"
                 onClick={() => {
                   const listObj: any = lists.find((l: any) => l._id === selectedList);
                   setRenameValue(listObj?.name || '');
@@ -257,7 +257,7 @@ export function Contacts() {
                   className="rounded bg-gray-700 text-white border border-gray-600 px-2 py-1 text-sm"
                 />
                 <Button
-                  variant="secondary"
+                  variant="secondary" size="sm"
                   onClick={async () => {
                     const name = renameValue.trim();
                     if (!name) { toast.error('Ingresa un nombre'); return; }
@@ -274,12 +274,12 @@ export function Contacts() {
                 >
                   Guardar
                 </Button>
-                <Button variant="ghost" onClick={() => { setRenaming(false); setRenameValue(''); }}>Cancelar</Button>
+                <Button size="sm" variant="ghost" onClick={() => { setRenaming(false); setRenameValue(''); }}>Cancelar</Button>
               </div>
             )}
             {!!selectedList && (
               <Button
-                variant="ghost"
+                variant="ghost" size="sm"
                 icon={Trash2}
                 onClick={async () => {
                   const listObj: any = lists.find((l: any) => l._id === selectedList);
@@ -299,19 +299,8 @@ export function Contacts() {
               </Button>
             )}
           </div>
-          <Button
-            variant="secondary"
-            icon={Download}
-            onClick={downloadTemplate}
-          >
-            Descargar Plantilla
-          </Button>
-          <Button
-            icon={Upload}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Cargar Contactos
-          </Button>
+          <Button variant="secondary" size="sm" icon={Download} onClick={downloadTemplate}>Descargar Plantilla</Button>
+          <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Cargar Contactos</Button>
         </div>
       </div>
 
@@ -351,7 +340,7 @@ export function Contacts() {
       </Card>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
         <Card>
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
@@ -393,22 +382,17 @@ export function Contacts() {
       {contacts.length > 0 && (
         <Card>
           <h3 className="text-lg font-semibold text-white mb-4">Lista de Contactos</h3>
-          <div className="max-h-96 overflow-y-auto space-y-2">
+          <div className="max-h-96 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {contacts.map((contact, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.05 }}
-                className="flex items-center justify-between p-3 bg-gray-700 rounded-lg"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: Math.min(index * 0.02, 0.3) }}
+                className="p-3 bg-gray-700 rounded-lg"
               >
-                <div>
-                  <p className="font-medium text-white">{contact.Nombre}</p>
-                  <p className="text-sm text-gray-400">{contact.Numero}</p>
-                </div>
-                {contact.email && (
-                  <p className="text-sm text-gray-400">{contact.email}</p>
-                )}
+                <p className="font-medium text-white truncate">{contact.Nombre}</p>
+                <p className="text-sm text-gray-400 truncate">{contact.Numero}{contact.email ? ' · ' + contact.email : ''}</p>
               </motion.div>
             ))}
           </div>

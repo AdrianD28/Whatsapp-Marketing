@@ -19,6 +19,7 @@ const viewTitles = {
 
 function AppContent() {
   const [currentView, setCurrentView] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const { apiCredentials, setApiCredentials, setTemplates, addActivity } = useAppContext();
   const { fetchTemplates, loading } = useApi(apiCredentials);
@@ -110,7 +111,22 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-900 flex">
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      {/* Sidebar desktop */}
+      <div className="hidden md:block">
+        <Sidebar currentView={currentView} onViewChange={(view) => { setCurrentView(view); }} />
+      </div>
+      {/* Sidebar móvil como drawer */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-40 flex md:hidden">
+          <div className="relative w-72 max-w-[80%]">
+            <Sidebar currentView={currentView} onViewChange={(view) => { setCurrentView(view); setSidebarOpen(false); }} />
+          </div>
+          <div
+            className="flex-1 bg-black/50"
+            onClick={() => setSidebarOpen(false)}
+          />
+        </div>
+      )}
       
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header
@@ -122,9 +138,10 @@ function AppContent() {
           isAuthenticated={!!apiCredentials}
           onLogin={handleLogin}
           onLogout={handleLogout}
+          onToggleSidebar={() => setSidebarOpen(v => !v)}
         />
         
-        <main className="flex-1 overflow-y-auto p-8">
+  <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
           {!apiCredentials ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-4">
