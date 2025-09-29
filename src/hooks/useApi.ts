@@ -38,18 +38,40 @@ export function useApi(credentials: ApiCredentials | null) {
   }, [credentials]);
   const [loading, setLoading] = useState(false);
 
-  const makeRequest = useCallback(async (url: string, options: RequestInit = {}) => {
+  const makeRequest = useCallback(async (inputUrl: string, options: RequestInit = {}) => {
     if (!credentials) {
       throw new Error('Credenciales de API no configuradas');
     }
 
-    const response = await fetch(url, {
+    const method = String(options.method || 'GET').toUpperCase();
+    const isGraph = inputUrl.startsWith('https://graph.facebook.com/');
+    let finalUrl = inputUrl;
+    const headers: Record<string, string> = { ...(options.headers as any) };
+
+    if (method === 'GET') {
+      // Evitar preflight CORS con Graph: no enviar Authorization ni Content-Type en GET.
+      // En su lugar, pasar el token como query param 'access_token'.
+      if (isGraph) {
+        const sep = finalUrl.includes('?') ? '&' : '?';
+        finalUrl = `${finalUrl}${sep}access_token=${encodeURIComponent(credentials.accessToken)}`;
+      } else {
+        headers['Authorization'] = `Bearer ${credentials.accessToken}`;
+      }
+      // No establecer Content-Type en GET
+      if (headers['Content-Type']) delete headers['Content-Type'];
+    } else {
+      // Para POST/DELETE/etc mantenemos Authorization
+      if (!headers['Authorization']) headers['Authorization'] = `Bearer ${credentials.accessToken}`;
+      // Solo establecer Content-Type si el body no es FormData y no está ya definido
+      const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+      if (!isFormData && options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await fetch(finalUrl, {
       ...options,
-      headers: {
-        'Authorization': `Bearer ${credentials.accessToken}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
+      // Asegurar método normalizado
+      method,
     });
 
     if (!response.ok) {
@@ -86,9 +108,18 @@ export function useApi(credentials: ApiCredentials | null) {
     
     setLoading(true);
     try {
-      const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?fields=name,status,category,language,components`;
+      const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?fields=name,status,category,language,components&limit=200`;
       const data = await makeRequest(url);
-      return data.data || [];
+      let items: Template[] = data.data || [];
+      // Paginación simple si existe next y quedan pocas (evitar loops infinitos)
+      const next = data.paging?.next as string | undefined;
+      if (next && items.length < 200) {
+        try {
+          const more = await makeRequest(next);
+          if (Array.isArray(more?.data)) items = items.concat(more.data);
+        } catch { /* ignorar */ }
+      }
+      return items;
     } catch (error) {
       console.error('Error fetching templates:', error);
       // Si el token expiró no mostramos toast aquí; dejamos que la capa superior fuerce re-login sin ruido.
@@ -96,7 +127,8 @@ export function useApi(credentials: ApiCredentials | null) {
         console.warn('[useApi] Token expirado detectado en fetchTemplates');
         throw error; // Propagar para que App.tsx maneje logout silencioso
       }
-      toast.error(`Error al cargar plantillas: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      const msg = error instanceof Error ? error.message : 'Error desconocido';
+      toast.error(`Error al cargar plantillas: ${msg}`);
       return [];
     } finally {
       setLoading(false);
