@@ -108,6 +108,44 @@ export function useApi(credentials: ApiCredentials | null) {
     
     setLoading(true);
     try {
+      // 1) Intentar primero vía backend para evitar CORS/bloqueadores
+      try {
+        const proxyRes = await fetch(`/api/meta/templates?limit=200`, {
+          headers: {
+            'x-access-token': credentials.accessToken,
+            'x-business-account-id': credentials.businessAccountId,
+          },
+        });
+        if (proxyRes.ok) {
+          const pData = await proxyRes.json();
+          let items: Template[] = pData.data || [];
+          // paginación mínima si hay next
+          const nextUrl = pData.paging?.next as string | undefined;
+          if (nextUrl && items.length < 200) {
+            try {
+              const nextRes = await fetch(`/api/meta/templates?limit=200&after=${encodeURIComponent(pData.paging.cursors?.after || '')}`, {
+                headers: {
+                  'x-access-token': credentials.accessToken,
+                  'x-business-account-id': credentials.businessAccountId,
+                },
+              });
+              if (nextRes.ok) {
+                const more = await nextRes.json();
+                if (Array.isArray(more?.data)) items = items.concat(more.data);
+              }
+            } catch {}
+          }
+          return items;
+        } else {
+          // si backend responde error, seguimos con llamada directa
+          const t = await proxyRes.text().catch(() => '');
+          console.warn('[useApi] backend /api/meta/templates no disponible', proxyRes.status, t);
+        }
+      } catch (e) {
+        console.warn('[useApi] proxy backend fallo, fallback directo a Graph', e);
+      }
+
+      // 2) Fallback directo a Graph
       const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?fields=name,status,category,language,components&limit=200`;
       const data = await makeRequest(url);
       let items: Template[] = data.data || [];

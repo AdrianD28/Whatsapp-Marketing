@@ -345,6 +345,34 @@ app.get('/diag/wa', async (req, res) => {
   }
 });
 
+// --- Meta Graph proxy: obtener plantillas desde el servidor (evita CORS y bloqueadores) ---
+app.get('/api/meta/templates', async (req, res) => {
+  try {
+    const accessToken = req.headers['x-access-token'] || req.query.accessToken || process.env.ACCESS_TOKEN;
+    const businessAccountId = req.headers['x-business-account-id'] || req.query.businessAccountId || process.env.BUSINESS_ACCOUNT_ID;
+    const limit = Number(req.query.limit || 200);
+    const after = req.query.after ? String(req.query.after) : undefined;
+    if (!accessToken || !businessAccountId) return res.status(400).json({ error: 'missing_credentials', message: 'ACCESS_TOKEN and BUSINESS_ACCOUNT_ID required' });
+
+    const params = new URLSearchParams();
+    params.set('fields', 'name,status,category,language,components');
+    params.set('limit', String(limit));
+    if (after) params.set('after', after);
+    const url = `https://graph.facebook.com/v22.0/${businessAccountId}/message_templates?${params.toString()}`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const text = await r.text();
+    let json;
+    try { json = JSON.parse(text); } catch { json = text; }
+    if (!r.ok) {
+      return res.status(r.status).json({ error: 'graph_error', status: r.status, detail: json });
+    }
+    return res.json(json);
+  } catch (err) {
+    console.error('/api/meta/templates error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
 // WhatsApp Webhook (verification + status logging)
 const webhookLog = [];
 app.get('/webhook/whatsapp', (req, res) => {
