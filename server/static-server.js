@@ -3,6 +3,7 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { Blob } from 'buffer';
 import { getDb, getAccountKeyFromReq, ObjectId } from './db.js';
 import helmet from 'helmet';
@@ -179,31 +180,183 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// Middleware de cuenta
-function requireAccount(req, res, next) {
-  const key = getAccountKeyFromReq(req);
-  if (!key) return res.status(400).json({ error: 'account_key_required', hint: 'envía X-Account-Key' });
-  req.accountKey = String(key);
-  next();
+// --- Auth helpers ---
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  return `s1$${salt}$${hash}`;
 }
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string') return false;
+  const parts = stored.split('$');
+  if (parts.length !== 3 || parts[0] !== 's1') return false;
+  const [, salt, hash] = parts;
+  const verify = crypto.scryptSync(String(password), salt, 64).toString('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(verify, 'hex'));
+  } catch {
+    return false;
+  }
+}
+async function createAuthToken(db, userId, days = 30) {
+  const token = crypto.randomBytes(32).toString('hex');
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  await db.collection('auth_tokens').insertOne({ token, userId: new ObjectId(userId), createdAt: now.toISOString(), expiresAt });
+  return token;
+}
+async function getUserFromAuth(req) {
+  const auth = req.headers['authorization'];
+  if (!auth || typeof auth !== 'string') return null;
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  if (!m) return null;
+  const token = m[1];
+  const db = await getDb();
+  const t = await db.collection('auth_tokens').findOne({ token });
+  if (!t) return null;
+  if (t.expiresAt && new Date(t.expiresAt) <= new Date()) return null;
+  const user = await db.collection('users').findOne({ _id: t.userId });
+  if (!user) return null;
+  return { id: String(user._id), email: user.email, name: user.name || null };
+}
+
+// Middleware de autorización: token de usuario o compatibilidad con X-Account-Key
+async function requireAuth(req, res, next) {
+  const user = await getUserFromAuth(req);
+  if (user) {
+    req.userId = user.id;
+    req.user = user;
+    return next();
+  }
+  // Fallback legacy
+  const key = getAccountKeyFromReq(req);
+  if (!key) return res.status(401).json({ error: 'auth_required', hint: 'Authorization: Bearer <token> o X-Account-Key' });
+  req.accountKey = String(key);
+  return next();
+}
+
+// Middleware que exige usuario (sin fallback a accountKey)
+async function requireUser(req, res, next) {
+  const user = await getUserFromAuth(req);
+  if (user) {
+    req.userId = user.id;
+    req.user = user;
+    return next();
+  }
+  return res.status(401).json({ error: 'auth_required', hint: 'Authorization: Bearer <token>' });
+}
+
+// --- Auth endpoints ---
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const db = await getDb();
+    const { email, password, name } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email_and_password_required' });
+    const emailNorm = String(email).trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) return res.status(400).json({ error: 'invalid_email' });
+    if (String(password).length < 6) return res.status(400).json({ error: 'weak_password', hint: 'min 6 chars' });
+    const exists = await db.collection('users').findOne({ email: emailNorm });
+    if (exists) return res.status(409).json({ error: 'email_taken' });
+    const passwordHash = hashPassword(password);
+    const now = new Date().toISOString();
+    const r = await db.collection('users').insertOne({ email: emailNorm, name: name?.trim() || null, passwordHash, createdAt: now, updatedAt: now });
+    const token = await createAuthToken(db, r.insertedId);
+    return res.json({ token, user: { id: String(r.insertedId), email: emailNorm, name: name?.trim() || null } });
+  } catch (err) {
+    console.error('/api/auth/register error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const db = await getDb();
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email_and_password_required' });
+    const emailNorm = String(email).trim().toLowerCase();
+    const user = await db.collection('users').findOne({ email: emailNorm });
+    if (!user) return res.status(401).json({ error: 'invalid_credentials' });
+    if (!verifyPassword(password, user.passwordHash)) return res.status(401).json({ error: 'invalid_credentials' });
+    const token = await createAuthToken(db, user._id);
+    return res.json({ token, user: { id: String(user._id), email: user.email, name: user.name || null } });
+  } catch (err) {
+    console.error('/api/auth/login error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.post('/api/auth/logout', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const auth = req.headers['authorization'] || '';
+    const m = /^Bearer\s+(.+)$/i.exec(String(auth));
+    if (!m) return res.json({ ok: true });
+    await db.collection('auth_tokens').deleteOne({ token: m[1] });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.json({ ok: true });
+  }
+});
+
+app.get('/api/auth/me', requireUser, async (req, res) => {
+  return res.json({ user: req.user });
+});
+
+// --- User Meta Credentials (plaintext as requested) ---
+app.get('/api/user/meta-credentials', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(req.userId) }, { projection: { metaCreds: 1 } });
+    const metaCreds = user?.metaCreds || null;
+    return res.json({ metaCreds });
+  } catch (err) {
+    console.error('/api/user/meta-credentials GET error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+app.put('/api/user/meta-credentials', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const { accessToken, phoneNumberId, businessAccountId, appId } = req.body || {};
+    // Validaciones mínimas (permite campos vacíos si el usuario quiere guardar parcialmente)
+    const metaCreds = {
+      accessToken: typeof accessToken === 'string' ? accessToken : '',
+      phoneNumberId: typeof phoneNumberId === 'string' ? phoneNumberId : '',
+      businessAccountId: typeof businessAccountId === 'string' ? businessAccountId : '',
+      appId: typeof appId === 'string' ? appId : undefined,
+    };
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(req.userId) },
+      { $set: { metaCreds, updatedAt: new Date().toISOString() } }
+    );
+    return res.json({ ok: true, metaCreds });
+  } catch (err) {
+    console.error('/api/user/meta-credentials PUT error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
 
 function isValidObjectId(id) {
   try { new ObjectId(id); return true; } catch { return false; }
 }
 
 // Listas de contactos
-app.get('/api/lists', requireAccount, async (req, res) => {
+app.get('/api/lists', requireAuth, async (req, res) => {
   const db = await getDb();
-  const lists = await db.collection('lists').find({ accountKey: req.accountKey }).sort({ createdAt: -1 }).toArray();
+  const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+  const lists = await db.collection('lists').find(scope).sort({ createdAt: -1 }).toArray();
   res.json(lists);
 });
-app.post('/api/lists', requireAccount, async (req, res) => {
+app.post('/api/lists', requireAuth, async (req, res) => {
   const db = await getDb();
   let { name } = req.body || {};
   if (typeof name !== 'string') return res.status(400).json({ error: 'name_required' });
   name = name.trim();
   if (!name || name.length > 100) return res.status(400).json({ error: 'invalid_name' });
-  const doc = { accountKey: req.accountKey, name, createdAt: new Date().toISOString() };
+  const doc = req.userId
+    ? { userId: req.userId, name, createdAt: new Date().toISOString() }
+    : { accountKey: req.accountKey, name, createdAt: new Date().toISOString() };
   try {
     const r = await db.collection('lists').insertOne(doc);
     res.json({ ...doc, _id: r.insertedId });
@@ -212,7 +365,7 @@ app.post('/api/lists', requireAccount, async (req, res) => {
     res.status(500).json({ error: 'insert_failed' });
   }
 });
-app.patch('/api/lists/:id', requireAccount, async (req, res) => {
+app.patch('/api/lists/:id', requireAuth, async (req, res) => {
   const db = await getDb();
   const id = req.params.id;
   if (!isValidObjectId(id)) return res.status(400).json({ error: 'invalid_id' });
@@ -221,7 +374,8 @@ app.patch('/api/lists/:id', requireAccount, async (req, res) => {
   name = name.trim();
   if (!name || name.length > 100) return res.status(400).json({ error: 'invalid_name' });
   try {
-    const r = await db.collection('lists').updateOne({ _id: new ObjectId(id), accountKey: req.accountKey }, { $set: { name, updatedAt: new Date().toISOString() } });
+    const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+    const r = await db.collection('lists').updateOne({ _id: new ObjectId(id), ...scope }, { $set: { name, updatedAt: new Date().toISOString() } });
     if (r.matchedCount === 0) return res.status(404).json({ error: 'not_found' });
     res.json({ ok: true });
   } catch (e) {
@@ -229,25 +383,26 @@ app.patch('/api/lists/:id', requireAccount, async (req, res) => {
     res.status(500).json({ error: 'update_failed' });
   }
 });
-app.delete('/api/lists/:id', requireAccount, async (req, res) => {
+app.delete('/api/lists/:id', requireAuth, async (req, res) => {
   const db = await getDb();
   const id = req.params.id;
   if (!isValidObjectId(id)) return res.status(400).json({ error: 'invalid_id' });
-  await db.collection('contacts').deleteMany({ accountKey: req.accountKey, listId: id });
-  await db.collection('lists').deleteOne({ _id: new ObjectId(id), accountKey: req.accountKey });
+  const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+  await db.collection('contacts').deleteMany({ ...scope, listId: id });
+  await db.collection('lists').deleteOne({ _id: new ObjectId(id), ...scope });
   res.json({ ok: true });
 });
 
 // Contactos
-app.get('/api/contacts', requireAccount, async (req, res) => {
+app.get('/api/contacts', requireAuth, async (req, res) => {
   const db = await getDb();
   const { listId } = req.query;
-  const filter = { accountKey: req.accountKey };
+  const filter = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
   if (listId) filter.listId = String(listId);
   const contacts = await db.collection('contacts').find(filter).sort({ createdAt: -1 }).limit(5000).toArray();
   res.json(contacts);
 });
-app.post('/api/contacts/bulk', requireAccount, async (req, res) => {
+app.post('/api/contacts/bulk', requireAuth, async (req, res) => {
   const db = await getDb();
   const { listId, contacts } = req.body || {};
   if (!listId) return res.status(400).json({ error: 'listId_required' });
@@ -255,7 +410,7 @@ app.post('/api/contacts/bulk', requireAccount, async (req, res) => {
   if (contacts.length > 10000) return res.status(400).json({ error: 'too_many_contacts' });
   const seen = new Set();
   const docs = contacts.map(c => ({
-    accountKey: req.accountKey,
+    ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
     listId: String(listId),
     nombre: String(c.Nombre ?? c.nombre ?? '').trim().slice(0, 120),
     numero: String((c.Numero ?? c.numero ?? '')).replace(/\D+/g, '').slice(0, 32),
@@ -266,25 +421,27 @@ app.post('/api/contacts/bulk', requireAccount, async (req, res) => {
   await db.collection('contacts').insertMany(docs, { ordered: false });
   res.json({ inserted: docs.length });
 });
-app.delete('/api/contacts', requireAccount, async (req, res) => {
+app.delete('/api/contacts', requireAuth, async (req, res) => {
   const db = await getDb();
   const { listId } = req.query;
   if (!listId) return res.status(400).json({ error: 'listId_required' });
-  const r = await db.collection('contacts').deleteMany({ accountKey: req.accountKey, listId: String(listId) });
+  const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+  const r = await db.collection('contacts').deleteMany({ ...scope, listId: String(listId) });
   res.json({ deleted: r.deletedCount });
 });
 
 // Actividades
-app.get('/api/activities', requireAccount, async (req, res) => {
+app.get('/api/activities', requireAuth, async (req, res) => {
   const db = await getDb();
-  const items = await db.collection('activities').find({ accountKey: req.accountKey }).sort({ timestamp: -1 }).limit(100).toArray();
+  const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+  const items = await db.collection('activities').find(scope).sort({ timestamp: -1 }).limit(100).toArray();
   res.json(items);
 });
-app.post('/api/activities', requireAccount, async (req, res) => {
+app.post('/api/activities', requireAuth, async (req, res) => {
   const db = await getDb();
   const a = req.body || {};
   const doc = {
-    accountKey: req.accountKey,
+    ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
     title: a.title,
     description: a.description,
     type: a.type || 'info',
@@ -295,16 +452,17 @@ app.post('/api/activities', requireAccount, async (req, res) => {
 });
 
 // Sesiones de envío (resumen)
-app.get('/api/sessions', requireAccount, async (req, res) => {
+app.get('/api/sessions', requireAuth, async (req, res) => {
   const db = await getDb();
-  const docs = await db.collection('sessions').find({ accountKey: req.accountKey }).sort({ timestamp: -1 }).limit(200).toArray();
+  const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+  const docs = await db.collection('sessions').find(scope).sort({ timestamp: -1 }).limit(200).toArray();
   res.json(docs);
 });
-app.post('/api/sessions', requireAccount, async (req, res) => {
+app.post('/api/sessions', requireAuth, async (req, res) => {
   const db = await getDb();
   const s = req.body || {};
   const doc = {
-    accountKey: req.accountKey,
+    ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
     templateName: s.templateName,
     templateCategory: s.templateCategory,
     templateBody: s.templateBody,

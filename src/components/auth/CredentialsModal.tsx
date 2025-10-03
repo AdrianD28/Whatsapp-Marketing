@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Key, Phone, Building } from 'lucide-react';
 import { Modal } from '../ui/Modal';
@@ -13,7 +14,7 @@ interface CredentialsModalProps {
 }
 
 export function CredentialsModal({ isOpen, onSave, onClose, initialCredentials }: CredentialsModalProps) {
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ApiCredentials>({
+  const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<ApiCredentials>({
     defaultValues: initialCredentials || {
       accessToken: '',
       phoneNumberId: '',
@@ -24,7 +25,40 @@ export function CredentialsModal({ isOpen, onSave, onClose, initialCredentials }
 
   const onSubmit = (data: ApiCredentials) => {
     onSave(data);
+    // Si hay token de usuario, persistir también en backend
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      if (token) {
+        fetch('/api/user/meta-credentials', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(data),
+        }).catch(() => {});
+      }
+    } catch {}
   };
+
+  // Al abrir el modal, si hay token, intenta precargar credenciales del backend
+  useEffect(() => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    if (!isOpen || !token) return;
+    (async () => {
+      try {
+        const r = await fetch('/api/user/meta-credentials', { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j?.metaCreds) {
+          const { accessToken, phoneNumberId, businessAccountId, appId } = j.metaCreds;
+          reset({
+            accessToken: accessToken || '',
+            phoneNumberId: phoneNumberId || '',
+            businessAccountId: businessAccountId || '',
+            appId: appId || ('' as any),
+          });
+        }
+      } catch {}
+    })();
+  }, [isOpen, reset]);
 
   return (
     <Modal

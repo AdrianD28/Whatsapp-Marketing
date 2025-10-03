@@ -19,11 +19,22 @@ export async function getDb() {
 }
 
 async function ensureIndexes(db) {
+  // Users & auth tokens
+  await db.collection('users').createIndex({ email: 1 }, { unique: true });
+  await db.collection('auth_tokens').createIndex({ token: 1 }, { unique: true });
+  await db.collection('auth_tokens').createIndex({ userId: 1 });
+  await db.collection('auth_tokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
   await db.collection('lists').createIndex({ accountKey: 1, name: 1 }, { unique: true });
+  await db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true, partialFilterExpression: { userId: { $exists: true } } });
   await db.collection('contacts').createIndex({ accountKey: 1, listId: 1 });
   await db.collection('contacts').createIndex({ accountKey: 1, numero: 1 });
+  await db.collection('contacts').createIndex({ userId: 1, listId: 1 }, { partialFilterExpression: { userId: { $exists: true } } });
+  await db.collection('contacts').createIndex({ userId: 1, numero: 1 }, { partialFilterExpression: { userId: { $exists: true } } });
   await db.collection('activities').createIndex({ accountKey: 1, timestamp: -1 });
+  await db.collection('activities').createIndex({ userId: 1, timestamp: -1 }, { partialFilterExpression: { userId: { $exists: true } } });
   await db.collection('sessions').createIndex({ accountKey: 1, timestamp: -1 });
+  await db.collection('sessions').createIndex({ userId: 1, timestamp: -1 }, { partialFilterExpression: { userId: { $exists: true } } });
 }
 
 export function getAccountKeyFromReq(req) {
