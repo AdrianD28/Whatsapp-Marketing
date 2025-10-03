@@ -38,13 +38,43 @@ app.use(helmet({
 // Trust proxy if behind reverse proxy (e.g., EasyPanel/NGINX)
 app.set('trust proxy', 1);
 
-// Rate limiting
-const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
-const maxReq = Number(process.env.RATE_LIMIT_MAX || 300);
-const apiLimiter = rateLimit({ windowMs, max: maxReq, standardHeaders: true, legacyHeaders: false });
-const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 2000, standardHeaders: true, legacyHeaders: false });
-app.use('/api', apiLimiter);
-app.use('/webhook', webhookLimiter);
+// --- Rate limiting refinado ---
+// Permitir desactivar completamente (p.ej. ambiente de prueba) con DISABLE_RATE_LIMIT=1
+const DISABLE_RATE_LIMIT = process.env.DISABLE_RATE_LIMIT === '1';
+if (!DISABLE_RATE_LIMIT) {
+  const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+  const maxReq = Number(process.env.RATE_LIMIT_MAX || 500); // subir un poco el global
+  // Limiter general para /api (excluye /api/auth/* y /api/health para evitar bloquear login y health checks)
+  const apiLimiter = rateLimit({
+    windowMs,
+    max: maxReq,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.path.startsWith('/api/auth/') || req.path === '/api/health'
+  });
+
+  // Limiter específico para auth (login/register): más estricto pero suficientemente amplio para no bloquear al usuario normal
+  const authLimiter = rateLimit({
+    windowMs: Number(process.env.AUTH_LIMIT_WINDOW_MS || 60 * 1000),
+    max: Number(process.env.AUTH_LIMIT_MAX || 60), // 60 intentos por minuto por IP (bastante generoso)
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Limiter para webhooks (alto volumen permitido)
+  const webhookLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 4000,
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.use('/api/auth', authLimiter);
+  app.use('/api', apiLimiter);
+  app.use('/webhook', webhookLimiter);
+} else {
+  console.warn('[rate-limit] Deshabilitado por DISABLE_RATE_LIMIT=1');
+}
 
 app.use('/static', express.static(staticDir));
 
