@@ -383,18 +383,22 @@ export function useApi(credentials: ApiCredentials | null) {
     }
     // 1) Intentar vía backend para logging centralizado y evitar exponer detalles en el cliente.
     try {
-      const backendRes = await fetch('/api/wa/send-template', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${credentials.accessToken}` },
-        body: JSON.stringify({ to, template: templateObj })
-      });
-      if (backendRes.ok) {
-        return backendRes.json();
+      const userToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      if (userToken) {
+        const backendRes = await fetch('/api/wa/send-template', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
+          body: JSON.stringify({ to, template: templateObj })
+        });
+        if (backendRes.ok) {
+          return backendRes.json();
+        } else {
+          const txt = await backendRes.text().catch(() => '');
+          console.warn('[sendMessage] backend /api/wa/send-template fallo, fallback directo', backendRes.status, txt);
+          if (/missing_meta_credentials/.test(txt)) throw new Error('Credenciales Meta faltantes en servidor');
+        }
       } else {
-        const txt = await backendRes.text().catch(() => '');
-        console.warn('[sendMessage] backend /api/wa/send-template fallo, fallback directo', backendRes.status, txt);
-        // Si es error de credenciales meta-credentials faltantes, relanzar para manejo UI
-        if (/missing_meta_credentials/.test(txt)) throw new Error('Credenciales Meta faltantes en servidor');
+        console.warn('[sendMessage] No hay auth_token de usuario, salto backend y uso Graph directo');
       }
     } catch (e) {
       console.warn('[sendMessage] error usando backend, fallback a Graph directo', e);
