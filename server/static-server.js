@@ -308,6 +308,19 @@ app.get('/api/user/meta-credentials', requireUser, async (req, res) => {
     const db = await getDb();
     const user = await db.collection('users').findOne({ _id: new ObjectId(req.userId) }, { projection: { metaCreds: 1 } });
     const metaCreds = user?.metaCreds || null;
+    if (metaCreds && metaCreds.phoneNumberId && metaCreds.businessAccountId) {
+      // Migración automática de datos legacy (accountKey -> userId)
+      const legacyKey = `${metaCreds.phoneNumberId}:${metaCreds.businessAccountId}`;
+      const userIdObj = new ObjectId(req.userId);
+      try {
+        const ops = ['lists','contacts','activities','sessions'];
+        for (const c of ops) {
+          await db.collection(c).updateMany({ accountKey: legacyKey, userId: { $exists: false } }, { $set: { userId: userIdObj } });
+        }
+      } catch (mErr) {
+        console.warn('legacy migration (GET) failed', mErr);
+      }
+    }
     return res.json({ metaCreds });
   } catch (err) {
     console.error('/api/user/meta-credentials GET error', err);
@@ -330,6 +343,22 @@ app.put('/api/user/meta-credentials', requireUser, async (req, res) => {
       { _id: new ObjectId(req.userId) },
       { $set: { metaCreds, updatedAt: new Date().toISOString() } }
     );
+    // Migrar datos legacy basados en accountKey (phoneNumberId:businessAccountId) -> userId
+    if (metaCreds.phoneNumberId && metaCreds.businessAccountId) {
+      const legacyKey = `${metaCreds.phoneNumberId}:${metaCreds.businessAccountId}`;
+      const userIdObj = new ObjectId(req.userId);
+      try {
+        const ops = ['lists','contacts','activities','sessions'];
+        const migrated = {};
+        for (const c of ops) {
+          const r = await db.collection(c).updateMany({ accountKey: legacyKey, userId: { $exists: false } }, { $set: { userId: userIdObj } });
+          migrated[c] = r.modifiedCount;
+        }
+        return res.json({ ok: true, metaCreds, migrated });
+      } catch (mErr) {
+        console.warn('legacy migration (PUT) failed', mErr);
+      }
+    }
     return res.json({ ok: true, metaCreds });
   } catch (err) {
     console.error('/api/user/meta-credentials PUT error', err);
