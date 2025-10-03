@@ -68,3 +68,9 @@ export interface AppState {
   apiCredentials: ApiCredentials | null;
   sendHistory: SendSession[];
 }
+
+export interface User {
+  id: string;
+  email: string;
+  name?: string | null;
+}

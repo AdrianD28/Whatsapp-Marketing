@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, Settings, LogIn, LogOut, Menu } from 'lucide-react';
+import { RefreshCw, Settings, LogIn, LogOut, Menu, User2, ChevronDown } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface HeaderProps {
@@ -13,6 +14,7 @@ interface HeaderProps {
   onLogout?: () => void;
   imageUrl?: string;
   onToggleSidebar?: () => void;
+  userEmail?: string | null;
 }
 
 export function Header({
@@ -26,7 +28,9 @@ export function Header({
   onLogout,
   imageUrl,
   onToggleSidebar,
+  userEmail,
 }: HeaderProps) {
+  const [openMenu, setOpenMenu] = useState(false);
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -57,15 +61,32 @@ export function Header({
           />
         )}
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="relative flex items-center gap-2 sm:gap-3">
           {!isAuthenticated ? (
             <Button variant="primary" size="sm" icon={LogIn} onClick={onLogin}>
               Login
             </Button>
           ) : (
-            <Button variant="danger" size="sm" icon={LogOut} onClick={onLogout}>
-              Logout
-            </Button>
+            <>
+              <button
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-gray-500"
+                onClick={() => setOpenMenu(v => !v)}
+              >
+                <User2 className="w-4 h-4" />
+                <span className="hidden sm:inline max-w-[180px] truncate">{userEmail || 'Mi cuenta'}</span>
+                <ChevronDown className={`w-4 h-4 transition-transform ${openMenu ? 'rotate-180' : ''}`} />
+              </button>
+              {openMenu && (
+                <div className="absolute right-0 top-10 z-20 min-w-[180px] rounded-md border border-gray-700 bg-gray-800 shadow-xl">
+                  <button className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2" onClick={() => { setOpenMenu(false); onSettings(); }}>
+                    <Settings className="w-4 h-4" /> Mi cuenta
+                  </button>
+                  <button className="w-full text-left px-4 py-2 text-sm text-red-300 hover:bg-red-900/30 flex items-center gap-2" onClick={() => { setOpenMenu(false); onLogout && onLogout(); }}>
+                    <LogOut className="w-4 h-4" /> Cerrar sesión
+                  </button>
+                </div>
+              )}
+            </>
           )}
           <Button
             variant="secondary"

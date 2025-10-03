@@ -4,6 +4,7 @@ import { AppProvider, useAppContext } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { CredentialsModal } from './components/auth/CredentialsModal';
+import { AuthModal } from './components/auth/AuthModal';
 import { Dashboard } from './views/Dashboard';
 import { Templates } from './views/Templates';
 import { Contacts } from './views/Contacts';
@@ -21,6 +22,8 @@ function AppContent() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const { apiCredentials, setApiCredentials, setTemplates, addActivity } = useAppContext();
   const { fetchTemplates, loading } = useApi(apiCredentials);
 
@@ -33,6 +36,20 @@ function AppContent() {
     // Intentar cargar solo si hay credenciales
     loadInitialData();
   }, [apiCredentials]);
+
+  // Cargar info del usuario si hay token en localStorage
+  useEffect(() => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    if (!token) { setUserEmail(null); return; }
+    (async () => {
+      try {
+        const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!r.ok) { setUserEmail(null); return; }
+        const j = await r.json();
+        setUserEmail(j?.user?.email ?? null);
+      } catch { setUserEmail(null); }
+    })();
+  }, [showAuthModal]);
 
   const loadInitialData = async () => {
     if (!apiCredentials) return;
@@ -85,12 +102,13 @@ function AppContent() {
   };
 
   const handleLogin = () => {
-    setShowCredentialsModal(true);
+    setShowAuthModal(true);
   };
 
   const handleLogout = () => {
     setApiCredentials(null);
     setTemplates([]);
+    try { localStorage.removeItem('auth_token'); } catch {}
     addActivity({
       title: 'Sesión cerrada',
       description: 'Se eliminaron las credenciales locales',
@@ -138,6 +156,7 @@ function AppContent() {
           isAuthenticated={!!apiCredentials}
           onLogin={handleLogin}
           onLogout={handleLogout}
+          userEmail={userEmail}
           onToggleSidebar={() => setSidebarOpen(v => !v)}
         />
         
@@ -164,6 +183,18 @@ function AppContent() {
         onSave={handleCredentialsSave}
         onClose={() => setShowCredentialsModal(false)}
         initialCredentials={apiCredentials}
+      />
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onAuthenticated={(token, user) => {
+          try { localStorage.setItem('auth_token', token); } catch {}
+          setShowAuthModal(false);
+          // Tras autenticar, abrir directamente el modal de credenciales para que configure su API
+          setShowCredentialsModal(true);
+          addActivity({ title: 'Sesión iniciada', description: `Bienvenido ${user?.email}`, type: 'success' });
+        }}
       />
 
       <Toaster
