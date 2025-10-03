@@ -24,23 +24,24 @@ function AppContent() {
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [hasToken, setHasToken] = useState<boolean>(() => {
+    try { return !!localStorage.getItem('auth_token'); } catch { return false; }
+  });
   const { apiCredentials, setApiCredentials, setTemplates, addActivity } = useAppContext();
   const { fetchTemplates, loading } = useApi(apiCredentials);
 
   useEffect(() => {
-    // Si no hay credenciales mostramos el modal al primer render
-    if (!apiCredentials) {
-      setShowCredentialsModal(true);
-      return;
+    // Cargar datos solo si hay token y credenciales
+    if (hasToken && apiCredentials) {
+      loadInitialData();
     }
-    // Intentar cargar solo si hay credenciales
-    loadInitialData();
-  }, [apiCredentials]);
+  }, [apiCredentials, hasToken]);
 
   // Cargar info del usuario si hay token en localStorage
   useEffect(() => {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
-    if (!token) { setUserEmail(null); return; }
+    if (!token) { setUserEmail(null); setHasToken(false); return; }
+    setHasToken(true);
     (async () => {
       try {
         const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
@@ -49,7 +50,7 @@ function AppContent() {
         setUserEmail(j?.user?.email ?? null);
       } catch { setUserEmail(null); }
     })();
-  }, [showAuthModal]);
+  }, [showAuthModal, hasToken]);
 
   const loadInitialData = async () => {
     if (!apiCredentials) return;
@@ -98,7 +99,11 @@ function AppContent() {
   };
 
   const handleSettings = () => {
-    setShowCredentialsModal(true);
+    if (!hasToken) {
+      setShowAuthModal(true);
+    } else {
+      setShowCredentialsModal(true);
+    }
   };
 
   const handleLogin = () => {
@@ -109,6 +114,7 @@ function AppContent() {
     setApiCredentials(null);
     setTemplates([]);
     try { localStorage.removeItem('auth_token'); } catch {}
+    setHasToken(false);
     addActivity({
       title: 'Sesión cerrada',
       description: 'Se eliminaron las credenciales locales',
@@ -153,7 +159,7 @@ function AppContent() {
           onRefresh={handleRefresh}
           onSettings={handleSettings}
           loading={loading}
-          isAuthenticated={!!apiCredentials}
+          isAuthenticated={hasToken}
           onLogin={handleLogin}
           onLogout={handleLogout}
           userEmail={userEmail}
@@ -161,16 +167,29 @@ function AppContent() {
         />
         
   <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">
-          {!apiCredentials ? (
+          {!hasToken ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-4">
                 <p className="text-gray-300 text-lg font-medium">Bienvenido 👋</p>
-                <p className="text-gray-400 max-w-md">Para comenzar introduce tus credenciales de Meta (Access Token, Phone Number ID y Business Account ID). Tus datos solo se guardan localmente.</p>
+                <p className="text-gray-400 max-w-md">Para comenzar crea una cuenta o inicia sesión. Luego podrás configurar tus credenciales de Meta y gestionar tus listas y plantillas.</p>
                 <button
-                  onClick={() => setShowCredentialsModal(true)}
+                  onClick={() => setShowAuthModal(true)}
                   className="inline-flex items-center px-6 py-3 rounded-md bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors shadow-lg shadow-green-600/20 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-gray-900"
                 >
-                  Configurar Credenciales
+                  Crear cuenta / Iniciar sesión
+                </button>
+              </div>
+            </div>
+          ) : !apiCredentials ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-4">
+                <p className="text-gray-300 text-lg font-medium">Configura tus credenciales de Meta</p>
+                <p className="text-gray-400 max-w-md">Aún no has añadido credenciales. Haz clic abajo para configurarlas.</p>
+                <button
+                  onClick={() => setShowCredentialsModal(true)}
+                  className="inline-flex items-center px-6 py-3 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors shadow-lg shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-gray-900"
+                >
+                  Configurar credenciales ahora
                 </button>
               </div>
             </div>
@@ -190,6 +209,7 @@ function AppContent() {
         onClose={() => setShowAuthModal(false)}
         onAuthenticated={(token, user) => {
           try { localStorage.setItem('auth_token', token); } catch {}
+          setHasToken(true);
           setShowAuthModal(false);
           // Tras autenticar, abrir directamente el modal de credenciales para que configure su API
           setShowCredentialsModal(true);
