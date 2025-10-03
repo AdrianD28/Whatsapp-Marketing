@@ -329,48 +329,78 @@ export function useApi(credentials: ApiCredentials | null) {
   const sendMessage = useCallback(async (to: string, templateName: string, language: string, parameters?: any[], namespace?: string) => {
     if (!credentials) throw new Error('Credenciales no configuradas');
 
+    // Construir objeto de plantilla con la forma mínima que Meta espera.
+    // Importante: NO incluir 'policy' ni 'recipient_type' pues pueden causar rechazo silencioso en algunas cuentas.
     const templateObj: any = {
       name: templateName,
-      language: { code: language, policy: 'deterministic' },
-      components: [] as any[],
+      language: { code: language }, // 'policy' no es necesario para envío
     };
     if (namespace) templateObj.namespace = namespace;
 
-  // Soporta parameters para body o header image.
-  // Formato esperado: { type:'image'|'text', image?:{link?:string,id?:string}, text?:string }
+    // Soporta parameters para body/header/button.
+    // Parámetros de entrada vienen en formato interno (header-text, image, text, button...).
     if (Array.isArray(parameters) && parameters.length > 0) {
       const headerParams: any[] = [];
       const bodyParams: any[] = [];
       const buttonComps: any[] = [];
       for (const p of parameters) {
-        if (p?.type === 'image' && (p.image?.link || p.image?.id)) {
-          const img: any = {};
-          if (p.image.link) img.link = p.image.link;
-          if (p.image.id) img.id = p.image.id;
-          headerParams.push({ type: 'image', image: img });
-        } else if (p?.type === 'header-text' && typeof p.text === 'string') {
-          headerParams.push({ type: 'text', text: p.text });
-        } else if (p?.type === 'text' && typeof p.text === 'string') {
-          bodyParams.push({ type: 'text', text: p.text });
-        } else if (p?.type === 'button' && p.sub_type === 'url' && (p.text || (p.parameters && p.parameters[0]?.text))) {
-          const index = String(p.index ?? 0);
-          const paramText = p.text ?? p.parameters[0]?.text;
-          buttonComps.push({ type: 'button', sub_type: 'url', index, parameters: [{ type: 'text', text: paramText }] });
+        try {
+          if (p?.type === 'image' && (p.image?.link || p.image?.id)) {
+            const img: any = {};
+            if (p.image.link) img.link = p.image.link;
+            if (p.image.id) img.id = p.image.id;
+            headerParams.push({ type: 'image', image: img });
+          } else if (p?.type === 'header-text' && typeof p.text === 'string') {
+            headerParams.push({ type: 'text', text: p.text });
+          } else if (p?.type === 'text' && typeof p.text === 'string') {
+            bodyParams.push({ type: 'text', text: p.text });
+          } else if (p?.type === 'button' && p.sub_type === 'url' && (p.text || (p.parameters && p.parameters[0]?.text))) {
+            const index = String(p.index ?? 0);
+            const paramText = p.text ?? p.parameters[0]?.text;
+            buttonComps.push({ type: 'button', sub_type: 'url', index, parameters: [{ type: 'text', text: paramText }] });
+          }
+        } catch (e) {
+          console.warn('[sendMessage] parámetro ignorado por formato inesperado', p, e);
         }
       }
-      if (headerParams.length > 0) templateObj.components.push({ type: 'header', parameters: headerParams });
-      if (bodyParams.length > 0) templateObj.components.push({ type: 'body', parameters: bodyParams });
-      for (const b of buttonComps) templateObj.components.push(b);
+      const components: any[] = [];
+      if (headerParams.length > 0) components.push({ type: 'header', parameters: headerParams });
+      if (bodyParams.length > 0) components.push({ type: 'body', parameters: bodyParams });
+      for (const b of buttonComps) components.push(b);
+      if (components.length > 0) templateObj.components = components; // Solo incluir si no está vacío
     }
 
-    const messagePayload = {
+    const messagePayload: any = {
       messaging_product: 'whatsapp',
       to,
-      recipient_type: 'individual',
       type: 'template',
       template: templateObj,
     };
 
+    // Debug opcional (no afecta producción, se puede quitar luego)
+    if (process.env.NODE_ENV !== 'production') {
+      console.debug('[sendMessage] payload', JSON.stringify(messagePayload));
+    }
+    // 1) Intentar vía backend para logging centralizado y evitar exponer detalles en el cliente.
+    try {
+      const backendRes = await fetch('/api/wa/send-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${credentials.accessToken}` },
+        body: JSON.stringify({ to, template: templateObj })
+      });
+      if (backendRes.ok) {
+        return backendRes.json();
+      } else {
+        const txt = await backendRes.text().catch(() => '');
+        console.warn('[sendMessage] backend /api/wa/send-template fallo, fallback directo', backendRes.status, txt);
+        // Si es error de credenciales meta-credentials faltantes, relanzar para manejo UI
+        if (/missing_meta_credentials/.test(txt)) throw new Error('Credenciales Meta faltantes en servidor');
+      }
+    } catch (e) {
+      console.warn('[sendMessage] error usando backend, fallback a Graph directo', e);
+    }
+
+    // 2) Fallback directo (mismo formato anterior)
     const url = `${META_GRAPH_URL}${credentials.phoneNumberId}/messages`;
     return makeRequest(url, {
       method: 'POST',

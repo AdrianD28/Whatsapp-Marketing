@@ -504,6 +504,99 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
   res.json(doc);
 });
 
+// --- Envío de plantillas vía servidor con logging detallado ---
+// Guarda cada intento en la colección send_logs para depuración futura.
+// Requiere usuario autenticado (usa metaCreds del usuario, no expone token en cliente durante el send).
+app.post('/api/wa/send-template', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const { to, template } = req.body || {};
+    if (!to || typeof to !== 'string') return res.status(400).json({ error: 'invalid_to' });
+    if (!template || typeof template !== 'object') return res.status(400).json({ error: 'invalid_template' });
+
+    const user = await db.collection('users').findOne({ _id: userIdObj }, { projection: { metaCreds: 1 } });
+    const creds = user?.metaCreds || {};
+    if (!creds.accessToken || !creds.phoneNumberId) {
+      return res.status(400).json({ error: 'missing_meta_credentials', hint: 'Configura accessToken y phoneNumberId' });
+    }
+
+    // Construir payload mínimo válido para Graph
+    const payload = {
+      messaging_product: 'whatsapp',
+      to: String(to),
+      type: 'template',
+      template: template,
+    };
+
+    const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
+    const gRes = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${creds.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    const text = await gRes.text().catch(() => '');
+    let graphJson;
+    try { graphJson = JSON.parse(text); } catch { graphJson = { raw: text }; }
+
+    // Insertar log
+    let logId = null;
+    try {
+      const logDoc = {
+        userId: userIdObj,
+        time: new Date().toISOString(),
+        to: String(to),
+        templateName: template?.name,
+        requestPayload: payload,
+        graphStatus: gRes.status,
+        graphResponse: graphJson,
+        success: gRes.ok,
+      };
+      const ins = await db.collection('send_logs').insertOne(logDoc);
+      logId = ins.insertedId;
+      // Mantenimiento básico: mantener solo últimos 2000 logs por usuario
+      const count = await db.collection('send_logs').countDocuments({ userId: userIdObj });
+      if (count > 2000) {
+        const excess = count - 2000;
+        // Borrar más antiguos usando _id (orden natural)
+        const old = await db.collection('send_logs').find({ userId: userIdObj }).sort({ _id: 1 }).limit(excess).project({ _id: 1 }).toArray();
+        const oldIds = old.map(o => o._id);
+        if (oldIds.length) await db.collection('send_logs').deleteMany({ _id: { $in: oldIds } });
+      }
+    } catch (logErr) {
+      console.warn('send_logs insert failed', logErr);
+    }
+
+    if (!gRes.ok) {
+      return res.status(gRes.status).json({ error: 'graph_error', status: gRes.status, response: graphJson, _logId: logId });
+    }
+    return res.json({ ...graphJson, _logId: logId });
+  } catch (err) {
+    console.error('/api/wa/send-template error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
+// Obtener últimos logs de envío (limit 50) para inspección rápida
+app.get('/api/wa/send-logs', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const logs = await db.collection('send_logs')
+      .find({ userId: userIdObj })
+      .sort({ _id: -1 })
+      .limit(50)
+      .project({ requestPayload: 0 }) // ocultar request completo para respuesta ligera
+      .toArray();
+    return res.json(logs);
+  } catch (err) {
+    return res.status(500).json({ error: 'logs_error', detail: String(err) });
+  }
+});
+
 // Diagnostics: Verify WA token + assets
 app.get('/diag/wa', async (req, res) => {
   try {
