@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Send as SendIcon, Play, Pause, Users, Settings } from 'lucide-react';
+import { Send as SendIcon, Play, Pause, Users, Settings, Eye } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -692,6 +692,103 @@ export function Send() {
                 )}
               </div>
             )}
+          </Card>
+
+          {/* Message Preview */}
+          <Card>
+            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Eye className="w-5 h-5" />
+              Previsualización del mensaje
+            </h3>
+            {(!selectedTemplate || contacts.length === 0) && (
+              <div className="text-sm text-gray-400">Selecciona una plantilla aprobada y asegúrate de tener al menos un contacto para ver la previsualización.</div>
+            )}
+            {selectedTemplate && contacts.length > 0 && (() => {
+              const first = contacts[0] as any;
+              // Helper para obtener valor mapeado (body/header/button)
+              const getValue = (scope: 'body'|'header'|'button', index: string) => {
+                const key = `${scope}:${index}`;
+                const field = paramMap[key];
+                if (field && typeof first[field] !== 'undefined') return String(first[field]);
+                // Fallbacks: {{1}} => Nombre, {{2+}} => Numero si no hay campo
+                if (index === '1') return String(first['Nombre'] || first['nombre'] || '');
+                return String(first['Numero'] || first['numero'] || '');
+              };
+
+              // BODY
+              const bodyComp = selectedTemplate.components.find((c: any) => c.type === 'BODY') as any;
+              let bodyText = bodyComp?.text || '';
+              bodyText = bodyText.replace(/\{\{(\d+)\}\}/g, (_: string, g1: string) => getValue('body', g1));
+
+              // HEADER
+              const headerComp = selectedTemplate.components.find((c: any) => c.type === 'HEADER') as any;
+              let headerText = '';
+              let headerType: 'TEXT'|'IMAGE'|null = null;
+              if (headerComp) {
+                headerType = (headerComp as any).format;
+                if (headerType === 'TEXT') {
+                  headerText = (headerComp.text || '').replace(/\{\{(\d+)\}\}/g, (_: string, g1: string) => getValue('header', g1));
+                }
+              }
+
+              // BUTTONS
+              const buttonsComp = selectedTemplate.components.find((c: any) => c.type === 'BUTTONS') as any;
+              const renderedButtons: { label: string; url?: string }[] = [];
+              if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
+                buttonsComp.buttons.forEach((b: any, idx: number) => {
+                  if (b.type === 'URL') {
+                    let url = b.url || '';
+                    url = url.replace(/\{\{(\d+)\}\}/g, (_: string, g1: string) => getValue('button', g1));
+                    renderedButtons.push({ label: b.text || `Botón ${idx+1}`, url });
+                  } else if (b.type === 'QUICK_REPLY') {
+                    renderedButtons.push({ label: b.text || `Botón ${idx+1}` });
+                  }
+                });
+              }
+
+              // Media header preview (imagen)
+              let headerMediaPreview: React.ReactNode = null;
+              const cachedMedia = selectedTemplate ? getTemplateMedia(selectedTemplate.name) : undefined;
+              const watchedHeaderUrl = watch('headerImageUrl');
+              if (headerType === 'IMAGE') {
+                if (cachedMedia?.link) {
+                  headerMediaPreview = <img src={cachedMedia.link} alt="header" className="max-h-40 rounded-md object-contain border border-gray-700" />;
+                } else if (cachedMedia?.id) {
+                  headerMediaPreview = <div className="text-xs px-2 py-2 rounded bg-gray-700 border border-gray-600 text-gray-300">Imagen (media id {cachedMedia.id})</div>;
+                } else if (watchedHeaderUrl) {
+                  headerMediaPreview = <img src={watchedHeaderUrl} alt="header" className="max-h-40 rounded-md object-contain border border-gray-700" />;
+                } else {
+                  headerMediaPreview = <div className="text-xs px-2 py-2 rounded bg-gray-800 border border-dashed border-gray-600 text-gray-500">No se ha configurado imagen aún</div>;
+                }
+              }
+
+              return (
+                <div className="space-y-4">
+                  {/* Simulación de burbuja WhatsApp */}
+                  <div className="bg-gray-800/70 rounded-lg p-4 border border-gray-700 max-w-sm">
+                    <div className="flex flex-col gap-3">
+                      {headerType === 'TEXT' && headerText && (
+                        <div className="text-sm font-semibold text-green-400 whitespace-pre-wrap break-words">{headerText}</div>
+                      )}
+                      {headerType === 'IMAGE' && (
+                        <div className="flex justify-center">{headerMediaPreview}</div>
+                      )}
+                      <div className="text-sm text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{bodyText}</div>
+                      {renderedButtons.length > 0 && (
+                        <div className="flex flex-col gap-2 pt-2">
+                          {renderedButtons.map((b, i) => (
+                            <div key={i} className="text-center text-xs font-medium px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition cursor-default border border-gray-600 text-gray-200">
+                              {b.label}{b.url ? <span className="block text-[10px] font-normal text-green-400 mt-1 truncate">{b.url}</span> : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-gray-500">Esta previsualización es aproximada y depende de los parámetros dinámicos del primer contacto. Durante el envío cada contacto recibirá sus valores personalizados.</div>
+                </div>
+              );
+            })()}
           </Card>
 
           {/* Progress */}
