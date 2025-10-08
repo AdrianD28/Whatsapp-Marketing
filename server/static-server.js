@@ -38,42 +38,19 @@ app.use(helmet({
 // Trust proxy if behind reverse proxy (e.g., EasyPanel/NGINX)
 app.set('trust proxy', 1);
 
-// --- Rate limiting refinado ---
-// Permitir desactivar completamente (p.ej. ambiente de prueba) con DISABLE_RATE_LIMIT=1
-const DISABLE_RATE_LIMIT = process.env.DISABLE_RATE_LIMIT === '1';
-if (!DISABLE_RATE_LIMIT) {
+// --- Rate limiting (simplificado) ---
+// Eliminamos límite para /api/auth para evitar 429 en login repetido.
+// Puedes reactivar en producción usando ENABLE_RATE_LIMIT=1.
+const ENABLE_RATE_LIMIT = process.env.ENABLE_RATE_LIMIT === '1';
+if (ENABLE_RATE_LIMIT) {
   const windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
-  const maxReq = Number(process.env.RATE_LIMIT_MAX || 500); // subir un poco el global
-  // Limiter general para /api (excluye /api/auth/* y /api/health para evitar bloquear login y health checks)
-  const apiLimiter = rateLimit({
-    windowMs,
-    max: maxReq,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: (req) => req.path.startsWith('/api/auth/') || req.path === '/api/health'
-  });
-
-  // Limiter específico para auth (login/register): más estricto pero suficientemente amplio para no bloquear al usuario normal
-  const authLimiter = rateLimit({
-    windowMs: Number(process.env.AUTH_LIMIT_WINDOW_MS || 60 * 1000),
-    max: Number(process.env.AUTH_LIMIT_MAX || 60), // 60 intentos por minuto por IP (bastante generoso)
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-
-  // Limiter para webhooks (alto volumen permitido)
-  const webhookLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 4000,
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-
-  app.use('/api/auth', authLimiter);
+  const maxReq = Number(process.env.RATE_LIMIT_MAX || 1000);
+  const apiLimiter = rateLimit({ windowMs, max: maxReq, standardHeaders: true, legacyHeaders: false });
+  const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 8000, standardHeaders: true, legacyHeaders: false });
   app.use('/api', apiLimiter);
   app.use('/webhook', webhookLimiter);
 } else {
-  console.warn('[rate-limit] Deshabilitado por DISABLE_RATE_LIMIT=1');
+  console.warn('[rate-limit] Desactivado (ENABLE_RATE_LIMIT no es 1)');
 }
 
 app.use('/static', express.static(staticDir));
@@ -664,8 +641,9 @@ app.get('/api/meta/templates', async (req, res) => {
     const after = req.query.after ? String(req.query.after) : undefined;
     if (!accessToken || !businessAccountId) return res.status(400).json({ error: 'missing_credentials', message: 'ACCESS_TOKEN and BUSINESS_ACCOUNT_ID required' });
 
-    const params = new URLSearchParams();
-    params.set('fields', 'name,status,category,language,components');
+  const params = new URLSearchParams();
+  // Añadimos id para poder eliminar por id (más fiable que por nombre)
+  params.set('fields', 'id,name,status,category,language,components');
     params.set('limit', String(limit));
     if (after) params.set('after', after);
     // Pasar el token como query param para evitar variaciones en encabezados (compatibilidad máxima)
@@ -682,6 +660,49 @@ app.get('/api/meta/templates', async (req, res) => {
     return res.json(json);
   } catch (err) {
     console.error('/api/meta/templates error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
+// Eliminar plantilla por ID
+app.delete('/api/meta/templates/:id', async (req, res) => {
+  try {
+    const accessToken = req.headers['x-access-token'] || req.query.accessToken || process.env.ACCESS_TOKEN;
+    const id = req.params.id;
+    if (!accessToken || !id) return res.status(400).json({ error: 'missing_params', message: 'accessToken e id requeridos' });
+    const url = `https://graph.facebook.com/v22.0/${encodeURIComponent(id)}?access_token=${encodeURIComponent(accessToken)}`;
+    const r = await fetch(url, { method: 'DELETE' });
+    const text = await r.text().catch(() => '');
+    let json; try { json = JSON.parse(text); } catch { json = text; }
+    if (!r.ok) {
+      console.warn('/api/meta/templates/:id delete_error', { status: r.status, json });
+      return res.status(r.status).json({ error: 'graph_error', status: r.status, detail: json });
+    }
+    return res.json({ ok: true, result: json });
+  } catch (err) {
+    console.error('/api/meta/templates/:id delete server_error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
+// Eliminar plantilla por nombre (fallback)
+app.delete('/api/meta/templates', async (req, res) => {
+  try {
+    const accessToken = req.headers['x-access-token'] || req.query.accessToken || process.env.ACCESS_TOKEN;
+    const businessAccountId = req.headers['x-business-account-id'] || req.query.businessAccountId || process.env.BUSINESS_ACCOUNT_ID;
+    const name = req.query.name ? String(req.query.name) : '';
+    if (!accessToken || !businessAccountId || !name) return res.status(400).json({ error: 'missing_params', message: 'accessToken, businessAccountId y name requeridos' });
+    const url = `https://graph.facebook.com/v22.0/${encodeURIComponent(businessAccountId)}/message_templates?name=${encodeURIComponent(name)}&access_token=${encodeURIComponent(accessToken)}`;
+    const r = await fetch(url, { method: 'DELETE' });
+    const text = await r.text().catch(() => '');
+    let json; try { json = JSON.parse(text); } catch { json = text; }
+    if (!r.ok) {
+      console.warn('/api/meta/templates delete_by_name_error', { status: r.status, json });
+      return res.status(r.status).json({ error: 'graph_error', status: r.status, detail: json });
+    }
+    return res.json({ ok: true, result: json });
+  } catch (err) {
+    console.error('/api/meta/templates delete_by_name server_error', err);
     return res.status(500).json({ error: 'server_error', detail: String(err) });
   }
 });
