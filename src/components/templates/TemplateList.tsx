@@ -6,7 +6,7 @@ import { Button } from '../ui/Button';
 
 interface TemplateListProps {
   templates: Template[];
-  onDelete?: (name: string) => Promise<void> | void;
+  onDelete?: (tpl: { id?: string; name: string }) => Promise<void> | void;
   onPreview?: (template: Template) => void;
 }
 
@@ -97,7 +97,7 @@ export function TemplateList({ templates, onDelete, onPreview }: TemplateListPro
                         e.stopPropagation();
                         const ok = confirm(`¿Eliminar la plantilla "${template.name}"?`);
                         if (!ok) return;
-                        await onDelete(template.name);
+                        await onDelete({ id: template.id, name: template.name });
                       }}
                     >
                       Eliminar

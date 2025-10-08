@@ -47,18 +47,18 @@ export function Templates() {
     }
   };
 
-  const handleDeleteTemplate = async (name: string) => {
+  const handleDeleteTemplate = async (tpl: { id?: string; name: string }) => {
     // Optimistic: quitar de la lista local inmediatamente
     const previous = templates;
-    const filtered = templates.filter(t => t.name !== name);
+    const filtered = templates.filter(t => t.name !== tpl.name);
     setTemplates(filtered);
     try {
-      await deleteTemplate(name);
+      await deleteTemplate(tpl);
       const latest = await fetchTemplates();
       setTemplates(latest);
       addActivity({
         title: 'Plantilla eliminada',
-        description: `Se eliminó "${name}"`,
+        description: `Se eliminó "${tpl.name}"`,
         type: 'success',
       });
     } catch (error) {

@@ -416,12 +416,34 @@ export function useApi(credentials: ApiCredentials | null) {
     loading,
     fetchTemplates,
     createTemplate,
-    deleteTemplate: useCallback(async (name: string) => {
+    deleteTemplate: useCallback(async (tpl: { id?: string; name: string }) => {
       if (!credentials) throw new Error('Credenciales no configuradas');
       setLoading(true);
       try {
-        const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?name=${encodeURIComponent(name)}`;
-        await makeRequest(url, { method: 'DELETE' });
+        const userToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+        let ok = false;
+        // 1) Intentar backend por ID si existe
+        if (tpl.id && userToken) {
+          try {
+            const r = await fetch(`/api/meta/templates/${encodeURIComponent(tpl.id)}?accessToken=${encodeURIComponent(credentials.accessToken)}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${userToken}` }
+            });
+            if (r.ok) {
+              ok = true;
+            } else {
+              const txt = await r.text().catch(() => '');
+              console.warn('[deleteTemplate] backend delete by id fallo', r.status, txt);
+            }
+          } catch (e) {
+            console.warn('[deleteTemplate] error backend id', e);
+          }
+        }
+        // 2) Si no se pudo, fallback a Graph por nombre (directo como antes)
+        if (!ok) {
+          const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?name=${encodeURIComponent(tpl.name)}`;
+          await makeRequest(url, { method: 'DELETE' });
+        }
         toast.success('Plantilla eliminada');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Error desconocido';
