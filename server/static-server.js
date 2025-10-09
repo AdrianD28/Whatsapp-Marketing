@@ -664,26 +664,7 @@ app.get('/api/meta/templates', async (req, res) => {
   }
 });
 
-// Eliminar plantilla por ID
-app.delete('/api/meta/templates/:id', async (req, res) => {
-  try {
-    const accessToken = req.headers['x-access-token'] || req.query.accessToken || process.env.ACCESS_TOKEN;
-    const id = req.params.id;
-    if (!accessToken || !id) return res.status(400).json({ error: 'missing_params', message: 'accessToken e id requeridos' });
-    const url = `https://graph.facebook.com/v22.0/${encodeURIComponent(id)}?access_token=${encodeURIComponent(accessToken)}`;
-    const r = await fetch(url, { method: 'DELETE' });
-    const text = await r.text().catch(() => '');
-    let json; try { json = JSON.parse(text); } catch { json = text; }
-    if (!r.ok) {
-      console.warn('/api/meta/templates/:id delete_error', { status: r.status, json });
-      return res.status(r.status).json({ error: 'graph_error', status: r.status, detail: json });
-    }
-    return res.json({ ok: true, result: json });
-  } catch (err) {
-    console.error('/api/meta/templates/:id delete server_error', err);
-    return res.status(500).json({ error: 'server_error', detail: String(err) });
-  }
-});
+
 
 // Eliminar plantilla por nombre (fallback)
 app.delete('/api/meta/templates', async (req, res) => {

@@ -420,30 +420,14 @@ export function useApi(credentials: ApiCredentials | null) {
       if (!credentials) throw new Error('Credenciales no configuradas');
       setLoading(true);
       try {
+        // Solo usar endpoint oficial por nombre
         const userToken = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
-        let ok = false;
-        // 1) Intentar backend por ID si existe
-        if (tpl.id && userToken) {
-          try {
-            const r = await fetch(`/api/meta/templates/${encodeURIComponent(tpl.id)}?accessToken=${encodeURIComponent(credentials.accessToken)}`, {
-              method: 'DELETE',
-              headers: { Authorization: `Bearer ${userToken}` }
-            });
-            if (r.ok) {
-              ok = true;
-            } else {
-              const txt = await r.text().catch(() => '');
-              console.warn('[deleteTemplate] backend delete by id fallo', r.status, txt);
-            }
-          } catch (e) {
-            console.warn('[deleteTemplate] error backend id', e);
-          }
-        }
-        // 2) Si no se pudo, fallback a Graph por nombre (directo como antes)
-        if (!ok) {
-          const url = `${META_GRAPH_URL}${credentials.businessAccountId}/message_templates?name=${encodeURIComponent(tpl.name)}`;
-          await makeRequest(url, { method: 'DELETE' });
-        }
+        const r = await fetch(`/api/meta/templates?name=${encodeURIComponent(tpl.name)}&accessToken=${encodeURIComponent(credentials.accessToken)}&businessAccountId=${encodeURIComponent(credentials.businessAccountId)}`, {
+          method: 'DELETE',
+          headers: userToken ? { Authorization: `Bearer ${userToken}` } : {}
+        });
+        const json = await r.json();
+        if (!r.ok) throw new Error(json?.detail?.error?.message || 'Error al eliminar plantilla');
         toast.success('Plantilla eliminada');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Error desconocido';
@@ -452,7 +436,7 @@ export function useApi(credentials: ApiCredentials | null) {
       } finally {
         setLoading(false);
       }
-    }, [credentials, makeRequest]),
+    }, [credentials]),
     sendMessage,
   };
 }
