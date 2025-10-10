@@ -361,6 +361,8 @@ app.put('/api/user/meta-credentials', requireUser, async (req, res) => {
           const r = await db.collection(c).updateMany({ accountKey: legacyKey, userId: { $exists: false } }, { $set: { userId: userIdObj } });
           migrated[c] = r.modifiedCount;
         }
+        // Opcional: limpiar accountKey en listas ya migradas para evitar que el índice parcial interfiera
+        await db.collection('lists').updateMany({ userId: userIdObj, accountKey: { $exists: true } }, { $unset: { accountKey: '' } });
         return res.json({ ok: true, metaCreds, migrated });
       } catch (mErr) {
         console.warn('legacy migration (PUT) failed', mErr);
@@ -390,9 +392,10 @@ app.post('/api/lists', requireAuth, async (req, res) => {
   if (typeof name !== 'string') return res.status(400).json({ error: 'name_required' });
   name = name.trim();
   if (!name || name.length > 100) return res.status(400).json({ error: 'invalid_name' });
+  const docBase = { name, createdAt: new Date().toISOString() };
   const doc = req.userId
-    ? { userId: req.userId, name, createdAt: new Date().toISOString() }
-    : { accountKey: req.accountKey, name, createdAt: new Date().toISOString() };
+    ? { ...docBase, userId: req.userId }
+    : { ...docBase, accountKey: req.accountKey };
   try {
     const r = await db.collection('lists').insertOne(doc);
     res.json({ ...doc, _id: r.insertedId });

@@ -25,8 +25,19 @@ async function ensureIndexes(db) {
   await db.collection('auth_tokens').createIndex({ userId: 1 });
   await db.collection('auth_tokens').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-  await db.collection('lists').createIndex({ accountKey: 1, name: 1 }, { unique: true });
-  await db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true, partialFilterExpression: { userId: { $exists: true } } });
+  // Corrige índice único para listas:
+  // - Por compatibilidad legacy se usaba {accountKey, name} único global, lo cual bloquea a usuarios nuevos (userId) porque los docs sin accountKey
+  //   colisionan con valores null en índices únicos. Soltamos ese índice si existe y creamos uno parcial solo cuando accountKey existe.
+  try { await db.collection('lists').dropIndex('accountKey_1_name_1'); } catch {}
+  try { await db.collection('lists').dropIndex({ accountKey: 1, name: 1 }); } catch {}
+  await db.collection('lists').createIndex(
+    { accountKey: 1, name: 1 },
+    { unique: true, partialFilterExpression: { accountKey: { $exists: true } } }
+  );
+  await db.collection('lists').createIndex(
+    { userId: 1, name: 1 },
+    { unique: true, partialFilterExpression: { userId: { $exists: true } } }
+  );
   await db.collection('contacts').createIndex({ accountKey: 1, listId: 1 });
   await db.collection('contacts').createIndex({ accountKey: 1, numero: 1 });
   await db.collection('contacts').createIndex({ userId: 1, listId: 1 }, { partialFilterExpression: { userId: { $exists: true } } });
