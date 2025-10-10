@@ -20,6 +20,33 @@ export function Contacts() {
   const [newListName, setNewListName] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  // Renderizado incremental para listas grandes
+  const SCROLL_CHUNK = 300;
+  const INITIAL_CHUNK = 300;
+  const [visibleCount, setVisibleCount] = useState<number>(INITIAL_CHUNK);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Resetear contador visible cuando cambian los contactos
+  useEffect(() => {
+    setVisibleCount(Math.min(contacts.length, INITIAL_CHUNK));
+  }, [contacts]);
+
+  // Cargar más al hacer scroll (IntersectionObserver sobre el contenedor con overflow)
+  useEffect(() => {
+    const root = scrollRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setVisibleCount((prev) => Math.min(prev + SCROLL_CHUNK, contacts.length));
+        }
+      }
+    }, { root, threshold: 0.1 });
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [contacts.length]);
 
   useEffect(() => {
     const init = async () => {
@@ -382,19 +409,31 @@ export function Contacts() {
       {contacts.length > 0 && (
         <Card>
           <h3 className="text-lg font-semibold text-white mb-4">Lista de Contactos</h3>
-          <div className="max-h-96 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {contacts.map((contact, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(index * 0.02, 0.3) }}
-                className="p-3 bg-gray-700 rounded-lg"
-              >
-                <p className="font-medium text-white truncate">{contact.Nombre}</p>
-                <p className="text-sm text-gray-400 truncate">{contact.Numero}{contact.email ? ' · ' + contact.email : ''}</p>
-              </motion.div>
-            ))}
+          <div ref={scrollRef} className="max-h-96 overflow-y-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {contacts.slice(0, visibleCount).map((contact, index) => {
+                const animated = visibleCount <= 200; // evitar animaciones cuando hay muchos elementos
+                return (
+                  <motion.div
+                    key={index}
+                    initial={animated ? { opacity: 0, y: 10 } : false as any}
+                    animate={animated ? { opacity: 1, y: 0 } : false as any}
+                    transition={animated ? { delay: Math.min(index * 0.02, 0.3) } : undefined}
+                    className="p-3 bg-gray-700 rounded-lg"
+                  >
+                    <p className="font-medium text-white truncate">{contact.Nombre}</p>
+                    <p className="text-sm text-gray-400 truncate">{contact.Numero}{contact.email ? ' · ' + contact.email : ''}</p>
+                  </motion.div>
+                );
+              })}
+            </div>
+            {/* Sentinel para cargar más */}
+            {visibleCount < contacts.length && (
+              <div ref={sentinelRef} className="py-3 text-center text-xs text-gray-400">Cargando más...</div>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            Mostrando {Math.min(visibleCount, contacts.length)} de {contacts.length}. Desplázate para cargar más.
           </div>
         </Card>
       )}
