@@ -134,7 +134,7 @@ export function Send() {
       return;
     }
 
-    setSending(true);
+  setSending(true);
     setSendProgress({ total: contacts.length, sent: 0, percentage: 0, isActive: true });
     
     addActivity({
@@ -150,6 +150,8 @@ export function Send() {
   let successCount = 0;
   let errorCount = 0;
   let mediaLogged = false;
+  // Identificador de campaña (batch) para reportes
+  const batchId = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     for (let i = 0; i < contacts.length; i++) {
       if (paused) {
@@ -314,7 +316,7 @@ export function Send() {
               }
             }
 
-            const resp = await sendMessage(toNumber, selectedTemplate.name, lang, params);
+            const resp = await sendMessage(toNumber, selectedTemplate.name, lang, params, undefined, { batchId });
             try {
               const msgId = resp?.messages?.[0]?.id;
               if (msgId && !mediaLogged) {
@@ -380,6 +382,7 @@ export function Send() {
         total: contacts.length,
         success: successCount,
         reached: successCount,
+        campaignId: batchId,
       });
     }
   } catch {}

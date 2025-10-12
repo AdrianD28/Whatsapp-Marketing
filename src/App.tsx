@@ -9,6 +9,7 @@ import { Dashboard } from './views/Dashboard';
 import { Templates } from './views/Templates';
 import { Contacts } from './views/Contacts';
 import { Send } from './views/Send';
+import { Statistics } from './views/Statistics';
 import { useApi } from './hooks/useApi';
 
 const viewTitles = {
@@ -16,6 +17,7 @@ const viewTitles = {
   templates: { title: 'Plantillas', subtitle: 'Gestiona tus plantillas de mensajes' },
   contacts: { title: 'Contactos', subtitle: 'Administra tu lista de contactos' },
   send: { title: 'Envío Masivo', subtitle: 'Configura y ejecuta campañas de mensajes' },
+  statistics: { title: 'Estadísticas', subtitle: 'Resultados de campañas y estados' },
 };
 
 function AppContent() {
@@ -127,6 +129,7 @@ function AppContent() {
       case 'templates': return <Templates />;
       case 'contacts': return <Contacts />;
       case 'send': return <Send />;
+      case 'statistics': return <Statistics />;
       default: return <Dashboard />;
     }
   };

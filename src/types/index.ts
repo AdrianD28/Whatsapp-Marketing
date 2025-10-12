@@ -57,6 +57,7 @@ export interface SendSession {
   total: number;
   success: number;
   reached: number; // normalmente igual a success
+  campaignId?: string | null;
 }
 
 export interface AppState {
@@ -67,6 +68,25 @@ export interface AppState {
   activities: Activity[];
   apiCredentials: ApiCredentials | null;
   sendHistory: SendSession[];
+}
+
+// Reportería
+export interface CampaignSummary {
+  campaignId: string;
+  templateName?: string;
+  timestamp: string;
+  total?: number;
+  success?: number;
+  reached?: number;
+  counts?: Record<string, number>; // por estado: sent, delivered, read, failed, etc.
+}
+
+export interface MessageEventRow {
+  messageId: string;
+  status: string;
+  lastRecipient?: string;
+  updatedAt?: string;
+  error?: any;
 }
 
 export interface User {

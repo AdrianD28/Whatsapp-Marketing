@@ -46,6 +46,15 @@ async function ensureIndexes(db) {
   await db.collection('activities').createIndex({ userId: 1, timestamp: -1 }, { partialFilterExpression: { userId: { $exists: true } } });
   await db.collection('sessions').createIndex({ accountKey: 1, timestamp: -1 });
   await db.collection('sessions').createIndex({ userId: 1, timestamp: -1 }, { partialFilterExpression: { userId: { $exists: true } } });
+
+  // Reportería
+  // send_logs: agrupar por campaña (batchId) y consultar por usuario
+  try { await db.collection('send_logs').createIndex({ userId: 1, time: -1 }); } catch {}
+  try { await db.collection('send_logs').createIndex({ userId: 1, batchId: 1, time: -1 }); } catch {}
+  try { await db.collection('send_logs').createIndex({ userId: 1, messageId: 1 }, { partialFilterExpression: { messageId: { $exists: true } }, unique: false }); } catch {}
+  // message_events: estados de webhook por mensaje
+  try { await db.collection('message_events').createIndex({ userId: 1, messageId: 1 }, { unique: true }); } catch {}
+  try { await db.collection('message_events').createIndex({ userId: 1, updatedAt: -1 }); } catch {}
 }
 
 export function getAccountKeyFromReq(req) {

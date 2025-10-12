@@ -21,6 +21,7 @@ const menuItems = [
   { id: 'templates', label: 'Plantillas', icon: FileText },
   { id: 'contacts', label: 'Contactos', icon: Users },
   { id: 'send', label: 'Envío Masivo', icon: Send },
+  { id: 'statistics', label: 'Estadísticas', icon: BarChart3 },
 ];
 
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
@@ -55,7 +56,9 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
             onClick={() => setIsCollapsed(!isCollapsed)}
             icon={isCollapsed ? Menu : X}
             className="!p-2"
-          />
+          >
+            <span className="sr-only">Toggle</span>
+          </Button>
         </div>
       </div>
 

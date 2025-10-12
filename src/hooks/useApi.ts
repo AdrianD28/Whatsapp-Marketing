@@ -326,7 +326,7 @@ export function useApi(credentials: ApiCredentials | null) {
     }
   }, [credentials, makeRequest, uploadMediaFromUrl, uploadMediaFromFile]);
 
-  const sendMessage = useCallback(async (to: string, templateName: string, language: string, parameters?: any[], namespace?: string) => {
+  const sendMessage = useCallback(async (to: string, templateName: string, language: string, parameters?: any[], namespace?: string, options?: { batchId?: string }) => {
     if (!credentials) throw new Error('Credenciales no configuradas');
 
     // Construir objeto de plantilla con la forma mínima que Meta espera.
@@ -388,7 +388,7 @@ export function useApi(credentials: ApiCredentials | null) {
         const backendRes = await fetch('/api/wa/send-template', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${userToken}` },
-          body: JSON.stringify({ to, template: templateObj })
+          body: JSON.stringify({ to, template: templateObj, batchId: options?.batchId })
         });
         if (backendRes.ok) {
           return backendRes.json();

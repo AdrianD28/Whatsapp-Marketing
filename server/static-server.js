@@ -509,9 +509,10 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
     total: s.total || 0,
     success: s.success || 0,
     reached: s.reached || 0,
+    campaignId: s.campaignId || null,
   };
-  await db.collection('sessions').insertOne(doc);
-  res.json(doc);
+  const r = await db.collection('sessions').insertOne(doc);
+  res.json({ ...doc, _id: r.insertedId });
 });
 
 // --- Envío de plantillas vía servidor con logging detallado ---
@@ -521,7 +522,7 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
   try {
     const db = await getDb();
     const userIdObj = new ObjectId(req.userId);
-    const { to, template } = req.body || {};
+    const { to, template, batchId } = req.body || {};
     if (!to || typeof to !== 'string') return res.status(400).json({ error: 'invalid_to' });
     if (!template || typeof template !== 'object') return res.status(400).json({ error: 'invalid_template' });
 
@@ -560,6 +561,7 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
         time: new Date().toISOString(),
         to: String(to),
         templateName: template?.name,
+        batchId: batchId || null,
         requestPayload: payload,
         graphStatus: gRes.status,
         graphResponse: graphJson,
@@ -583,6 +585,21 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     if (!gRes.ok) {
       return res.status(gRes.status).json({ error: 'graph_error', status: gRes.status, response: graphJson, _logId: logId });
     }
+
+    // Guardar messageId para correlación si existe
+    try {
+      const messageId = graphJson?.messages?.[0]?.id;
+      if (messageId) {
+        await db.collection('send_logs').updateOne({ _id: logId }, { $set: { messageId } });
+        // crear registro base de evento si no existe
+        await db.collection('message_events').updateOne(
+          { userId: userIdObj, messageId },
+          { $setOnInsert: { userId: userIdObj, messageId, status: 'sent', createdAt: new Date().toISOString() }, $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null } },
+          { upsert: true }
+        );
+      }
+    } catch {}
+
     return res.json({ ...graphJson, _logId: logId });
   } catch (err) {
     console.error('/api/wa/send-template error', err);
@@ -703,9 +720,10 @@ app.get('/webhook/whatsapp', (req, res) => {
   }
   return res.status(403).send('Forbidden');
 });
-app.post('/webhook/whatsapp', (req, res) => {
+app.post('/webhook/whatsapp', async (req, res) => {
   try {
     const body = req.body || {};
+    const db = await getDb();
     // Log minimal info about statuses
     const entries = body.entry || [];
     for (const e of entries) {
@@ -722,6 +740,30 @@ app.post('/webhook/whatsapp', (req, res) => {
             errors: s.errors,
             biz: v.metadata?.display_phone_number,
           });
+          // Persistir por messageId cuando sea posible; el id es el messageId
+          try {
+            const messageId = s.id;
+            if (messageId) {
+              // No conocemos el userId desde el webhook sin verificar; intentamos encontrar por send_logs
+              const logDoc = await db.collection('send_logs').findOne({ messageId });
+              if (logDoc?.userId) {
+                const userIdObj = logDoc.userId;
+                const update = {
+                  status: s.status,
+                  updatedAt: new Date().toISOString(),
+                  lastRecipient: s.recipient_id,
+                  error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
+                };
+                await db.collection('message_events').updateOne(
+                  { userId: userIdObj, messageId },
+                  { $set: update, $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null } },
+                  { upsert: true }
+                );
+              }
+            }
+          } catch (perr) {
+            console.warn('webhook persist failed', perr);
+          }
         }
       }
     }
@@ -734,6 +776,107 @@ app.post('/webhook/whatsapp', (req, res) => {
 });
 app.get('/webhook/log', (req, res) => {
   res.json(webhookLog.slice(-100));
+});
+
+// --- Reportes ---
+// Resumen por campaña (batchId) con conteos por estado
+app.get('/api/reports/campaigns', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+    const from = req.query.from ? new Date(String(req.query.from)) : null;
+    const to = req.query.to ? new Date(String(req.query.to)) : null;
+    // Obtener últimas campañas desde sessions o send_logs
+    const sessionFilter = { userId: userIdObj };
+    if (from || to) {
+      sessionFilter['timestamp'] = {};
+      if (from) sessionFilter['timestamp'].$gte = from.toISOString();
+      if (to) sessionFilter['timestamp'].$lte = to.toISOString();
+    }
+    const sessions = await db.collection('sessions').find(sessionFilter).sort({ timestamp: -1 }).limit(200).toArray();
+    const byCampaign = new Map();
+    for (const s of sessions) {
+      const key = s.campaignId || (s._id ? String(s._id) : s.timestamp);
+      byCampaign.set(key, { campaignId: key, templateName: s.templateName, timestamp: s.timestamp, total: s.total, success: s.success, reached: s.reached });
+    }
+    // Agregar desde send_logs por batchId si existe
+    const logsFilter = { userId: userIdObj };
+    if (from || to) {
+      logsFilter['time'] = {};
+      if (from) logsFilter['time'].$gte = from.toISOString();
+      if (to) logsFilter['time'].$lte = to.toISOString();
+    }
+    const logs = await db.collection('send_logs').find(logsFilter).sort({ time: -1 }).limit(2000).project({ batchId: 1, time: 1, templateName: 1 }).toArray();
+    for (const l of logs) {
+      if (!l.batchId) continue;
+      if (!byCampaign.has(l.batchId)) byCampaign.set(l.batchId, { campaignId: l.batchId, templateName: l.templateName, timestamp: l.time });
+    }
+  const campaigns = Array.from(byCampaign.values()).sort((a, b) => (+new Date(b.timestamp)) - (+new Date(a.timestamp))).slice(0, limit);
+    // Para cada campaña, contar estados desde message_events
+    for (const c of campaigns) {
+      const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
+      const pipeline = [
+        { $match: match },
+        { $group: { _id: '$status', count: { $sum: 1 } } }
+      ];
+      const agg = await db.collection('message_events').aggregate(pipeline).toArray();
+      const counts = Object.fromEntries(agg.map(x => [x._id || 'unknown', x.count]));
+      c['counts'] = counts;
+    }
+    return res.json({ data: campaigns });
+  } catch (err) {
+    console.error('/api/reports/campaigns error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Detalle de campaña por batchId (o por sessionId) con lista de mensajes recientes
+app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const id = String(req.params.id);
+    const limit = Math.min(Number(req.query.limit || 200), 1000);
+    const skip = Math.max(Number(req.query.skip || 0), 0);
+    const from = req.query.from ? new Date(String(req.query.from)) : null;
+    const to = req.query.to ? new Date(String(req.query.to)) : null;
+    const status = req.query.status ? String(req.query.status) : '';
+    const q = req.query.q ? String(req.query.q).trim() : '';
+    // Buscar eventos por batchId con filtros
+    const evFilter = { userId: userIdObj, batchId: id };
+    if (status) evFilter['status'] = status;
+    if (from || to) {
+      evFilter['updatedAt'] = {};
+      if (from) evFilter['updatedAt'].$gte = from.toISOString();
+      if (to) evFilter['updatedAt'].$lte = to.toISOString();
+    }
+    if (q) evFilter['lastRecipient'] = { $regex: q.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), $options: 'i' };
+    const cursor = db.collection('message_events').find(evFilter).sort({ updatedAt: -1 }).skip(skip).limit(limit);
+    const events = await cursor.toArray();
+    // Totales
+    const pipeline = [
+      { $match: { userId: userIdObj, batchId: id } },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ];
+    const agg = await db.collection('message_events').aggregate(pipeline).toArray();
+    const counts = Object.fromEntries(agg.map(x => [x._id || 'unknown', x.count]));
+    // Intentar recuperar metadata de la sesión
+    const session = await db.collection('sessions').findOne({ userId: req.userId, campaignId: id });
+    const meta = session ? {
+      templateName: session.templateName,
+      templateCategory: session.templateCategory,
+      templateBody: session.templateBody,
+      timestamp: session.timestamp,
+      total: session.total,
+      success: session.success,
+      reached: session.reached,
+    } : null;
+    return res.json({ batchId: id, counts, events, meta });
+  } catch (err) {
+    console.error('/api/reports/campaigns/:id error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
 
 // Create template server-side: recibe metadata + file opcional y crea la plantilla en Graph API
