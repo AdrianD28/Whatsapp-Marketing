@@ -510,6 +510,7 @@ app.post('/api/sessions', requireAuth, async (req, res) => {
     success: s.success || 0,
     reached: s.reached || 0,
     campaignId: s.campaignId || null,
+    campaignName: s.campaignName || null,
   };
   const r = await db.collection('sessions').insertOne(doc);
   res.json({ ...doc, _id: r.insertedId });
@@ -798,7 +799,7 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
     const byCampaign = new Map();
     for (const s of sessions) {
       const key = s.campaignId || (s._id ? String(s._id) : s.timestamp);
-      byCampaign.set(key, { campaignId: key, templateName: s.templateName, timestamp: s.timestamp, total: s.total, success: s.success, reached: s.reached });
+      byCampaign.set(key, { campaignId: key, campaignName: s.campaignName, templateName: s.templateName, timestamp: s.timestamp, total: s.total, success: s.success, reached: s.reached });
     }
     // Agregar desde send_logs por batchId si existe
     const logsFilter = { userId: userIdObj };
@@ -864,6 +865,7 @@ app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
     // Intentar recuperar metadata de la sesión
     const session = await db.collection('sessions').findOne({ userId: req.userId, campaignId: id });
     const meta = session ? {
+      campaignName: session.campaignName,
       templateName: session.templateName,
       templateCategory: session.templateCategory,
       templateBody: session.templateBody,

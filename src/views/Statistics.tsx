@@ -67,21 +67,24 @@ export function Statistics() {
       const total = c.total || delivered + failed;
       const rate = total ? Math.round((delivered / total) * 100) : 0;
       const readRate = total ? Math.round((read / total) * 100) : 0;
-      return { ...c, delivered, read, failed, total: total || 0, rate, readRate };
+      return { ...c, delivered, read, failed, total: total || 0, rate, readRate, campaignName: (c as any).campaignName };
     });
     return items;
   }, [campaigns]);
 
   const exportCampaign = async () => {
     if (!selectedId || !detail) return;
-    const meta = (await getCampaign(selectedId)).meta || {};
+    const full = await getCampaign(selectedId);
+    const meta = full.meta || {};
     const counts = detail.counts || {};
     // Sheet 1: Resumen
     const resumen = [
       { Campo: 'Campaña', Valor: selectedId },
+      { Campo: 'Nombre de campaña', Valor: meta.campaignName || '' },
       { Campo: 'Fecha', Valor: meta.timestamp ? new Date(meta.timestamp).toLocaleString() : '' },
       { Campo: 'Plantilla', Valor: meta.templateName || '' },
       { Campo: 'Categoría', Valor: meta.templateCategory || '' },
+      { Campo: 'Mensaje (body)', Valor: meta.templateBody || '' },
       { Campo: 'Enviados', Valor: meta.total ?? '' },
       { Campo: 'Entregados', Valor: counts.delivered || 0 },
       { Campo: 'Leídos', Valor: counts.read || 0 },
@@ -90,14 +93,21 @@ export function Statistics() {
     const wsResumen = XLSX.utils.json_to_sheet(resumen);
 
     // Sheet 2: Detalle
+    const renderPreview = (recipient: string) => {
+      const body = String(meta.templateBody || '');
+      // Reemplaza {{1}},{{2}}... con valores neutros para una vista previa mínima
+      const replaced = body.replace(/\{\{(\d+)\}\}/g, (_: string, g1: string) => g1 === '1' ? recipient : '');
+      return replaced;
+    };
     const rows = (detail.events || []).map((e: any) => ({
-      messageId: e.messageId || e._id || '',
-      estado: e.status || '',
-      destinatario: e.lastRecipient || '',
-      actualizado: e.updatedAt ? new Date(e.updatedAt).toLocaleString() : '',
-      error: e.error ? JSON.stringify(e.error) : '',
+      Mensaje: e.messageId || e._id || '',
+      Estado: e.status || '',
+      Destinatario: e.lastRecipient || '',
+      Actualizado: e.updatedAt ? new Date(e.updatedAt).toLocaleString() : '',
+      Previo: renderPreview(e.lastRecipient || ''),
+      Error: e.error ? (typeof e.error === 'string' ? e.error : JSON.stringify(e.error)) : '',
     }));
-    const wsDetalle = XLSX.utils.json_to_sheet(rows);
+    const wsDetalle = XLSX.utils.json_to_sheet(rows, { header: ['Mensaje','Estado','Destinatario','Actualizado','Previo','Error'] });
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
@@ -186,6 +196,7 @@ export function Statistics() {
               <thead>
                 <tr className="text-left text-gray-400">
                   <th className="px-2 py-2">Fecha</th>
+                  <th className="px-2 py-2">Campaña</th>
                   <th className="px-2 py-2">Plantilla</th>
                   <th className="px-2 py-2">Destinatarios</th>
                   <th className="px-2 py-2">Entregados</th>
@@ -200,7 +211,8 @@ export function Statistics() {
                 {summary.map(c => (
                   <tr key={c.campaignId} className={`border-t border-gray-800 ${selectedId === c.campaignId ? 'bg-gray-800/40' : ''}`}>
                     <td className="px-2 py-2 text-gray-300">{new Date(c.timestamp).toLocaleString()}</td>
-                    <td className="px-2 py-2 text-white">{c.templateName || '-'}</td>
+                    <td className="px-2 py-2 text-white">{(c as any).campaignName || '-'}</td>
+                    <td className="px-2 py-2 text-gray-300">{c.templateName || '-'}</td>
                     <td className="px-2 py-2 text-gray-300">{c.total ?? '-'}</td>
                     <td className="px-2 py-2 text-green-400">{c.delivered}</td>
                     <td className="px-2 py-2 text-blue-400">{c.read}</td>

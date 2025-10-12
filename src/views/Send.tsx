@@ -375,6 +375,7 @@ export function Send() {
   try {
     if (selectedTemplate) {
       const bodyComp = selectedTemplate.components.find((c: any) => c.type === 'BODY') as any;
+      const humanName = `${selectedTemplate.name} - ${new Date().toLocaleString()}`;
       addSendSession({
         templateName: selectedTemplate.name,
         templateCategory: selectedTemplate.category,
@@ -383,6 +384,7 @@ export function Send() {
         success: successCount,
         reached: successCount,
         campaignId: batchId,
+        campaignName: humanName,
       });
     }
   } catch {}
