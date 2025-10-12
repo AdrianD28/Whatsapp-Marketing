@@ -72,48 +72,53 @@ export function Statistics() {
     return items;
   }, [campaigns]);
 
-  const exportCampaign = async () => {
-    if (!selectedId || !detail) return;
-    const full = await getCampaign(selectedId);
-    const meta = full.meta || {};
-    const counts = detail.counts || {};
-    // Sheet 1: Resumen
-    const resumen = [
-      { Campo: 'Campaña', Valor: selectedId },
-      { Campo: 'Nombre de campaña', Valor: meta.campaignName || '' },
-      { Campo: 'Fecha', Valor: meta.timestamp ? new Date(meta.timestamp).toLocaleString() : '' },
-      { Campo: 'Plantilla', Valor: meta.templateName || '' },
-      { Campo: 'Categoría', Valor: meta.templateCategory || '' },
-      { Campo: 'Mensaje (body)', Valor: meta.templateBody || '' },
-      { Campo: 'Enviados', Valor: meta.total ?? '' },
-      { Campo: 'Entregados', Valor: counts.delivered || 0 },
-      { Campo: 'Leídos', Valor: counts.read || 0 },
-      { Campo: 'Errores', Valor: counts.failed || counts.undelivered || 0 },
-    ];
-    const wsResumen = XLSX.utils.json_to_sheet(resumen);
+  const exportCampaign = async (campaignId: string) => {
+    try {
+      const full = await getCampaign(campaignId);
+      const meta = full.meta || {};
+      const counts = full.counts || {};
+      
+      // Sheet 1: Resumen con estructura clara
+      const resumenData = [
+        ['Campaña', campaignId],
+        ['Nombre', meta.campaignName || '-'],
+        ['Fecha', meta.timestamp ? new Date(meta.timestamp).toLocaleString() : '-'],
+        ['Plantilla', meta.templateName || '-'],
+        ['Categoría', meta.templateCategory || '-'],
+        ['Mensaje', meta.templateBody || '-'],
+        ['', ''],
+        ['Métrica', 'Cantidad'],
+        ['Enviados', meta.total || 0],
+        ['Entregados', counts.delivered || 0],
+        ['Leídos', counts.read || 0],
+        ['Errores', counts.failed || counts.undelivered || 0],
+      ];
+      const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
 
-    // Sheet 2: Detalle
-    const renderPreview = (recipient: string) => {
-      const body = String(meta.templateBody || '');
-      // Reemplaza {{1}},{{2}}... con valores neutros para una vista previa mínima
-      const replaced = body.replace(/\{\{(\d+)\}\}/g, (_: string, g1: string) => g1 === '1' ? recipient : '');
-      return replaced;
-    };
-    const rows = (detail.events || []).map((e: any) => ({
-      Mensaje: e.messageId || e._id || '',
-      Estado: e.status || '',
-      Destinatario: e.lastRecipient || '',
-      Actualizado: e.updatedAt ? new Date(e.updatedAt).toLocaleString() : '',
-      Previo: renderPreview(e.lastRecipient || ''),
-      Error: e.error ? (typeof e.error === 'string' ? e.error : JSON.stringify(e.error)) : '',
-    }));
-    const wsDetalle = XLSX.utils.json_to_sheet(rows, { header: ['Mensaje','Estado','Destinatario','Actualizado','Previo','Error'] });
+      // Sheet 2: Detalle estructurado
+      const detailData = [
+        ['ID Mensaje', 'Estado', 'Destinatario', 'Fecha actualización', 'Mensaje enviado']
+      ];
+      (full.events || []).forEach((e: any) => {
+        const body = String(meta.templateBody || '').replace(/\{\{1\}\}/g, e.lastRecipient || '');
+        detailData.push([
+          e.messageId || '',
+          e.status || '',
+          e.lastRecipient || '',
+          e.updatedAt ? new Date(e.updatedAt).toLocaleString() : '',
+          body
+        ]);
+      });
+      const wsDetalle = XLSX.utils.aoa_to_sheet(detailData);
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
-    XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
-    const fileName = `campania_${selectedId}_${new Date().toISOString().slice(0,10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+      XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
+      const fileName = `campania_${meta.campaignName || campaignId}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (err) {
+      console.error('Export error:', err);
+    }
   };
 
   return (
@@ -123,12 +128,7 @@ export function Statistics() {
           <h2 className="text-2xl font-bold text-white flex items-center gap-2"><BarChart3 className="w-6 h-6"/> Estadísticas</h2>
           <p className="text-gray-400">Cada envío masivo es una campaña</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" icon={RefreshCw} onClick={load} disabled={loading}>Actualizar</Button>
-          {selectedId && detail && (
-            <Button variant="secondary" icon={Download} onClick={exportCampaign}>Exportar Excel</Button>
-          )}
-        </div>
+        <Button variant="secondary" icon={RefreshCw} onClick={load} disabled={loading}>Actualizar</Button>
       </div>
 
       {/* Filtros globales por fecha */}
@@ -219,8 +219,9 @@ export function Statistics() {
                     <td className="px-2 py-2 text-red-400">{c.failed}</td>
                     <td className="px-2 py-2 text-white font-semibold">{c.rate}%</td>
                     <td className="px-2 py-2 text-white">{c.readRate}%</td>
-                    <td className="px-2 py-2 text-right">
+                    <td className="px-2 py-2 text-right flex gap-2">
                       <Button size="sm" onClick={() => setSelectedId(c.campaignId)} icon={ChevronRight}>Detalle</Button>
+                      <Button size="sm" variant="secondary" icon={Download} onClick={() => exportCampaign(c.campaignId)}>Exportar</Button>
                     </td>
                   </tr>
                 ))}
@@ -233,10 +234,6 @@ export function Statistics() {
       {/* Detail */}
       {selectedId && detail && (
         <Card>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold">Detalle de campaña {selectedId}</h3>
-            <Button size="sm" variant="secondary" icon={Download} onClick={exportCampaign}>Exportar</Button>
-          </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <div>
               <div className="text-xs text-gray-400 mb-1">Estado</div>
