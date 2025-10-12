@@ -78,42 +78,87 @@ export function Statistics() {
       const meta = full.meta || {};
       const counts = full.counts || {};
       
-      // Sheet 1: Resumen con estructura clara
-      const resumenData = [
-        ['Campaña', campaignId],
-        ['Nombre', meta.campaignName || '-'],
-        ['Fecha', meta.timestamp ? new Date(meta.timestamp).toLocaleString() : '-'],
-        ['Plantilla', meta.templateName || '-'],
-        ['Categoría', meta.templateCategory || '-'],
-        ['Mensaje', meta.templateBody || '-'],
-        ['', ''],
-        ['Métrica', 'Cantidad'],
-        ['Enviados', meta.total || 0],
-        ['Entregados', counts.delivered || 0],
-        ['Leídos', counts.read || 0],
-        ['Errores', counts.failed || counts.undelivered || 0],
+      // Construir datos exactos como en la referencia
+      const excelData = [
+        [
+          'celular',
+          'message', 
+          'cantidad_x_login',
+          'messageId',
+          'fecha_envio_plataforma',
+          'fecha_whatsapp_confirmado',
+          'fecha_whatsapp_confirmado_entrega',
+          'fecha_whatsapp_confirmado_leido',
+          'id_plantilla',
+          'tipo_plantilla',
+          'status',
+          'ERROR',
+          'Soft Bounce'
+        ]
       ];
-      const wsResumen = XLSX.utils.aoa_to_sheet(resumenData);
 
-      // Sheet 2: Detalle estructurado
-      const detailData = [
-        ['ID Mensaje', 'Estado', 'Destinatario', 'Fecha actualización', 'Mensaje enviado']
-      ];
       (full.events || []).forEach((e: any) => {
         const body = String(meta.templateBody || '').replace(/\{\{1\}\}/g, e.lastRecipient || '');
-        detailData.push([
-          e.messageId || '',
-          e.status || '',
-          e.lastRecipient || '',
-          e.updatedAt ? new Date(e.updatedAt).toLocaleString() : '',
-          body
+        const recipient = e.lastRecipient || '';
+        const messageId = e.messageId || '';
+        const status = e.status ? e.status.toUpperCase() : '';
+        const timestamp = e.updatedAt ? new Date(e.updatedAt).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : '';
+        
+        // Determinar qué columna de fecha usar según el estado
+        let fechaEnvio = timestamp;
+        let fechaConfirmado = '';
+        let fechaEntrega = '';
+        let fechaLeido = '';
+        
+        if (status === 'SENT') {
+          fechaEnvio = timestamp;
+        } else if (status === 'DELIVERED') {
+          fechaConfirmado = timestamp;
+          fechaEntrega = timestamp;
+        } else if (status === 'READ') {
+          fechaConfirmado = timestamp;
+          fechaEntrega = timestamp;
+          fechaLeido = timestamp;
+        }
+
+        excelData.push([
+          recipient,
+          body,
+          '1',
+          messageId,
+          fechaEnvio,
+          fechaConfirmado,
+          fechaEntrega,
+          fechaLeido,
+          meta.templateName || '',
+          meta.templateCategory || 'Marketing',
+          status === 'DELIVERED' || status === 'READ' ? 'ENREGADO - LEIDO' : status,
+          status === 'FAILED' ? 'ERROR' : '',
+          ''
         ]);
       });
-      const wsDetalle = XLSX.utils.aoa_to_sheet(detailData);
+
+      const ws = XLSX.utils.aoa_to_sheet(excelData);
+      
+      // Ajustar anchos de columna
+      ws['!cols'] = [
+        { wch: 15 }, // celular
+        { wch: 50 }, // message
+        { wch: 15 }, // cantidad_x_login
+        { wch: 35 }, // messageId
+        { wch: 22 }, // fecha_envio_plataforma
+        { wch: 22 }, // fecha_whatsapp_confirmado
+        { wch: 22 }, // fecha_whatsapp_confirmado_entrega
+        { wch: 22 }, // fecha_whatsapp_confirmado_leido
+        { wch: 15 }, // id_plantilla
+        { wch: 15 }, // tipo_plantilla
+        { wch: 20 }, // status
+        { wch: 10 }, // ERROR
+        { wch: 15 }  // Soft Bounce
+      ];
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
-      XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
+      XLSX.utils.book_append_sheet(wb, ws, 'Worksheet');
       const fileName = `campania_${meta.campaignName || campaignId}_${new Date().toISOString().slice(0,10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
     } catch (err) {
