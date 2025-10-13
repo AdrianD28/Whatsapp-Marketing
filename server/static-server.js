@@ -939,12 +939,12 @@ async function processCampaignBackground(campaignId) {
     const contacts = allContacts.filter(c => !optOutNumbers.has(c.numero));
     
     // Log de contactos filtrados
-    const skippedCount = allContacts.length - contacts.length;
-    if (skippedCount > 0) {
-      console.log(`⚠️ Campaign ${campaignId}: Skipped ${skippedCount} contacts with opt-out`);
+    const skippedOptOutsCount = allContacts.length - contacts.length;
+    if (skippedOptOutsCount > 0) {
+      console.log(`⚠️ Campaign ${campaignId}: Skipped ${skippedOptOutsCount} contacts with opt-out`);
       await db.collection('campaigns').updateOne(
         { _id: campaign._id },
-        { $set: { skippedOptOuts: skippedCount } }
+        { $set: { skippedOptOuts: skippedOptOutsCount } }
       );
     }
 
