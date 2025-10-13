@@ -55,13 +55,83 @@ if (ENABLE_RATE_LIMIT) {
 
 app.use('/static', express.static(staticDir));
 
+// --- WhatsApp Webhook (verification + status logging) ---
+const webhookLog = [];
+app.get('/webhook/whatsapp', (req, res) => {
+  const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN || 'changeme';
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === verifyToken) {
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).send('Forbidden');
+});
+app.post('/webhook/whatsapp', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const db = await getDb();
+    // Log minimal info about statuses
+    const entries = body.entry || [];
+    for (const e of entries) {
+      const changes = e.changes || [];
+      for (const c of changes) {
+        const v = c.value || {};
+        const statuses = v.statuses || [];
+        for (const s of statuses) {
+          webhookLog.push({
+            time: new Date().toISOString(),
+            id: s.id,
+            status: s.status,
+            recipient: s.recipient_id,
+            errors: s.errors,
+            biz: v.metadata?.display_phone_number,
+          });
+          // Persistir por messageId cuando sea posible; el id es el messageId
+          try {
+            const messageId = s.id;
+            if (messageId) {
+              // No conocemos el userId desde el webhook sin verificar; intentamos encontrar por send_logs
+              const logDoc = await db.collection('send_logs').findOne({ messageId });
+              if (logDoc?.userId) {
+                const userIdObj = logDoc.userId;
+                const update = {
+                  status: s.status,
+                  updatedAt: new Date().toISOString(),
+                  lastRecipient: s.recipient_id,
+                  error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
+                };
+                await db.collection('message_events').updateOne(
+                  { userId: userIdObj, messageId },
+                  { $set: update, $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null } },
+                  { upsert: true }
+                );
+              }
+            }
+          } catch (perr) {
+            console.warn('webhook persist failed', perr);
+          }
+        }
+      }
+    }
+    // Keep last 200
+    if (webhookLog.length > 200) webhookLog.splice(0, webhookLog.length - 200);
+    return res.sendStatus(200);
+  } catch (err) {
+    return res.sendStatus(200);
+  }
+});
+app.get('/webhook/log', (req, res) => {
+  res.json(webhookLog.slice(-100));
+});
+
 // Serve frontend `dist` if it exists (SPA fallback to index.html)
 const distDir = path.join(process.cwd(), 'dist');
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
   app.get('*', (req, res, next) => {
     // If request is for API routes, skip
-    if (req.path.startsWith('/api') || req.path.startsWith('/upload') || req.path.startsWith('/resumable-upload') || req.path.startsWith('/upload-media') || req.path.startsWith('/create-template') || req.path.startsWith('/static')) return next();
+    if (req.path.startsWith('/api') || req.path.startsWith('/upload') || req.path.startsWith('/resumable-upload') || req.path.startsWith('/upload-media') || req.path.startsWith('/create-template') || req.path.startsWith('/static') || req.path.startsWith('/webhook')) return next();
     res.sendFile(path.join(distDir, 'index.html'));
   });
 }
