@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { FileText, CheckCircle, Clock, Users, Download } from 'lucide-react';
 import { StatsCard } from '../components/dashboard/StatsCard';
 import { ActivityFeed } from '../components/dashboard/ActivityFeed';
+import { QualityRatingAlert } from '../components/compliance/QualityRatingAlert';
 import { useAppContext } from '../context/AppContext';
 import * as XLSX from 'xlsx';
 import { Button } from '../components/ui/Button';
@@ -63,6 +64,9 @@ export function Dashboard() {
       animate={{ opacity: 1 }}
       className="space-y-8"
     >
+      {/* 🚨 Quality Rating Alert (solo si hay credenciales) */}
+      {apiCredentials?.accessToken && <QualityRatingAlert />}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard

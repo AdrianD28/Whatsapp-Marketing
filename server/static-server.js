@@ -77,6 +77,71 @@ app.post('/webhook/whatsapp', async (req, res) => {
       const changes = e.changes || [];
       for (const c of changes) {
         const v = c.value || {};
+        
+        // 🚨 NUEVO: Detectar mensajes entrantes para opt-out automático
+        const messages = v.messages || [];
+        for (const msg of messages) {
+          try {
+            const text = (msg.text?.body || '').toLowerCase().trim();
+            const from = msg.from; // Número del usuario
+            
+            // Palabras clave de opt-out (español + inglés)
+            const optOutKeywords = [
+              'stop', 'baja', 'no más', 'no mas', 'cancelar', 'dejar de recibir',
+              'unsubscribe', 'remove', 'salir', 'ya no', 'detener'
+            ];
+            
+            if (optOutKeywords.some(kw => text.includes(kw))) {
+              // Intentar encontrar userId desde contactos
+              const contact = await db.collection('contacts').findOne({ numero: from });
+              
+              if (contact?.userId) {
+                // Agregar a lista de opt-outs
+                await db.collection('opt_outs').updateOne(
+                  { userId: contact.userId, numero: from },
+                  { 
+                    $set: { 
+                      numero: from,
+                      userId: contact.userId,
+                      optOutDate: new Date().toISOString(),
+                      reason: 'user_request',
+                      keyword: text.substring(0, 50), // Guardar keyword usado
+                      source: 'webhook'
+                    } 
+                  },
+                  { upsert: true }
+                );
+                
+                console.log(`✅ Opt-out registered: ${from} (userId: ${contact.userId})`);
+                
+                // Opcional: Marcar contacto como opt-out
+                await db.collection('contacts').updateMany(
+                  { userId: contact.userId, numero: from },
+                  { $set: { optedOut: true, optOutDate: new Date().toISOString() } }
+                );
+              } else {
+                // Si no encontramos userId, guardar como global (por si llega de otro canal)
+                await db.collection('opt_outs').updateOne(
+                  { numero: from, userId: { $exists: false } },
+                  { 
+                    $set: { 
+                      numero: from,
+                      optOutDate: new Date().toISOString(),
+                      reason: 'user_request_no_user',
+                      keyword: text.substring(0, 50),
+                      source: 'webhook'
+                    } 
+                  },
+                  { upsert: true }
+                );
+                console.log(`⚠️ Opt-out registered (no userId): ${from}`);
+              }
+            }
+          } catch (msgErr) {
+            console.warn('opt-out detection failed', msgErr);
+          }
+        }
+        
         const statuses = v.statuses || [];
         for (const s of statuses) {
           webhookLog.push({
@@ -513,10 +578,12 @@ app.get('/api/contacts', requireAuth, async (req, res) => {
 });
 app.post('/api/contacts/bulk', requireAuth, async (req, res) => {
   const db = await getDb();
-  const { listId, contacts } = req.body || {};
+  const { listId, contacts, optInSource } = req.body || {};
   if (!listId) return res.status(400).json({ error: 'listId_required' });
   if (!Array.isArray(contacts)) return res.status(400).json({ error: 'contacts_array_required' });
   if (contacts.length > 10000) return res.status(400).json({ error: 'too_many_contacts' });
+  
+  const now = new Date().toISOString();
   const seen = new Set();
   const docs = contacts.map(c => ({
     ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
@@ -524,8 +591,13 @@ app.post('/api/contacts/bulk', requireAuth, async (req, res) => {
     nombre: String(c.Nombre ?? c.nombre ?? '').trim().slice(0, 120),
     numero: String((c.Numero ?? c.numero ?? '')).replace(/\D+/g, '').slice(0, 32),
     email: (c.email || c.Email) ? String(c.email || c.Email).trim().slice(0, 254) : undefined,
-    createdAt: new Date().toISOString(),
+    // 🚨 NUEVO: Opt-in por defecto al importar (asumimos consentimiento si usuario los sube)
+    optInDate: c.optInDate || now,
+    optInSource: c.optInSource || optInSource || 'bulk_import',
+    optedOut: false,
+    createdAt: now,
   })).filter(d => d.numero && !seen.has(d.numero) && seen.add(d.numero));
+  
   if (!docs.length) return res.status(400).json({ error: 'no_valid_contacts' });
   await db.collection('contacts').insertMany(docs, { ordered: false });
   res.json({ inserted: docs.length });
@@ -537,6 +609,38 @@ app.delete('/api/contacts', requireAuth, async (req, res) => {
   const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
   const r = await db.collection('contacts').deleteMany({ ...scope, listId: String(listId) });
   res.json({ deleted: r.deletedCount });
+});
+
+// 🚨 NUEVO: Actualizar opt-in de contactos
+app.patch('/api/contacts/:id/opt-in', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const id = req.params.id;
+    if (!isValidObjectId(id)) return res.status(400).json({ error: 'invalid_id' });
+    
+    const { optInSource } = req.body || {};
+    const scope = req.userId ? { userId: req.userId } : { accountKey: req.accountKey };
+    
+    const update = {
+      optInDate: new Date().toISOString(),
+      optInSource: optInSource || 'manual',
+      optedOut: false
+    };
+    
+    const result = await db.collection('contacts').updateOne(
+      { _id: new ObjectId(id), ...scope },
+      { $set: update, $unset: { optOutDate: '' } }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'contact_not_found' });
+    }
+    
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('/api/contacts/:id/opt-in error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
 
 // Actividades
@@ -678,6 +782,584 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
   }
 });
 
+// --- NUEVO: Sistema de envío en background para campañas grandes ---
+// Permite enviar miles de mensajes sin depender del navegador abierto
+
+// Map para trackear campañas activas en memoria (persiste en DB también)
+const activeCampaigns = new Map();
+
+// Función helper para enviar un mensaje individual
+async function sendSingleMessage(db, userId, to, template, batchId, creds) {
+  // 🚨 CRÍTICO: Validar opt-out antes de enviar
+  const optOut = await db.collection('opt_outs').findOne({ 
+    numero: to,
+    $or: [
+      { userId: new ObjectId(userId) },
+      { userId: { $exists: false } }
+    ]
+  });
+  
+  if (optOut) {
+    return { 
+      success: false, 
+      error: 'contact_opted_out', 
+      skipped: true 
+    };
+  }
+
+  // 🚨 CRÍTICO: Validar frecuencia 24h (evitar spam)
+  const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const recentMessage = await db.collection('send_logs').findOne({
+    userId: new ObjectId(userId),
+    to: to,
+    time: { $gte: last24h },
+    success: true
+  });
+  
+  if (recentMessage) {
+    console.warn(`⚠️ Frequency limit: ${to} already received message in last 24h`);
+    return { 
+      success: false, 
+      error: 'frequency_limit_24h', 
+      skipped: true,
+      lastMessageTime: recentMessage.time
+    };
+  }
+
+  // 🚨 OPCIONAL: Validar opt-in (solo si contact existe)
+  // Comentado por defecto, descomentar para enforcement estricto
+  /*
+  const contact = await db.collection('contacts').findOne({ 
+    userId: new ObjectId(userId), 
+    numero: to 
+  });
+  
+  if (contact && !contact.optInDate) {
+    console.warn(`⚠️ Opt-in missing: ${to}`);
+    return { 
+      success: false, 
+      error: 'opt_in_required', 
+      skipped: true 
+    };
+  }
+  */
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: String(to),
+    type: 'template',
+    template: template,
+  };
+
+  const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
+  const gRes = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${creds.accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+  
+  const text = await gRes.text().catch(() => '');
+  let graphJson;
+  try { graphJson = JSON.parse(text); } catch { graphJson = { raw: text }; }
+
+  // Log del envío
+  const logDoc = {
+    userId: new ObjectId(userId),
+    time: new Date().toISOString(),
+    to: String(to),
+    templateName: template?.name,
+    batchId: batchId || null,
+    requestPayload: payload,
+    graphStatus: gRes.status,
+    graphResponse: graphJson,
+    success: gRes.ok,
+    messageId: graphJson?.messages?.[0]?.id || null,
+  };
+  
+  await db.collection('send_logs').insertOne(logDoc);
+
+  // Si fue exitoso, crear evento inicial
+  if (gRes.ok && logDoc.messageId) {
+    await db.collection('message_events').updateOne(
+      { userId: new ObjectId(userId), messageId: logDoc.messageId },
+      { 
+        $setOnInsert: { userId: new ObjectId(userId), messageId: logDoc.messageId, status: 'sent', createdAt: new Date().toISOString() }, 
+        $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null } 
+      },
+      { upsert: true }
+    );
+  }
+
+  return { success: gRes.ok, messageId: logDoc.messageId, response: graphJson };
+}
+
+// Procesar campaña en background
+async function processCampaignBackground(campaignId) {
+  const db = await getDb();
+  let campaign = await db.collection('campaigns').findOne({ _id: new ObjectId(campaignId) });
+  
+  if (!campaign) {
+    console.error(`Campaign ${campaignId} not found`);
+    return;
+  }
+
+  try {
+    // Marcar como procesando
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { $set: { status: 'processing', startedAt: new Date().toISOString() } }
+    );
+
+    const user = await db.collection('users').findOne({ _id: campaign.userId });
+    const creds = user?.metaCreds || {};
+    
+    if (!creds.accessToken || !creds.phoneNumberId) {
+      await db.collection('campaigns').updateOne(
+        { _id: campaign._id },
+        { $set: { status: 'failed', error: 'missing_credentials', completedAt: new Date().toISOString() } }
+      );
+      return;
+    }
+
+    // 🚨 CRÍTICO: Filtrar contactos con opt-out ANTES de empezar
+    const allContacts = campaign.contacts || [];
+    const optOuts = await db.collection('opt_outs')
+      .find({ 
+        $or: [
+          { userId: campaign.userId },
+          { userId: { $exists: false } } // Opt-outs globales
+        ]
+      })
+      .toArray();
+    
+    const optOutNumbers = new Set(optOuts.map(o => o.numero));
+    const contacts = allContacts.filter(c => !optOutNumbers.has(c.numero));
+    
+    // Log de contactos filtrados
+    const skippedCount = allContacts.length - contacts.length;
+    if (skippedCount > 0) {
+      console.log(`⚠️ Campaign ${campaignId}: Skipped ${skippedCount} contacts with opt-out`);
+      await db.collection('campaigns').updateOne(
+        { _id: campaign._id },
+        { $set: { skippedOptOuts: skippedCount } }
+      );
+    }
+
+    if (contacts.length === 0) {
+      await db.collection('campaigns').updateOne(
+        { _id: campaign._id },
+        { $set: { status: 'completed', error: 'all_contacts_opted_out', completedAt: new Date().toISOString() } }
+      );
+      console.warn(`Campaign ${campaignId} completed: all contacts have opted out`);
+      return;
+    }
+
+    const template = campaign.template;
+    const batchId = campaign.batchId;
+    let successCount = 0;
+    let failedCount = 0;
+    let skippedCount = 0; // 🚨 NUEVO: Contar skipped (opt-out, frecuencia)
+
+    // Trackear en memoria
+    activeCampaigns.set(String(campaign._id), {
+      total: contacts.length,
+      processed: 0,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      status: 'processing'
+    });
+
+    for (let i = 0; i < contacts.length; i++) {
+      // Verificar si la campaña fue pausada
+      campaign = await db.collection('campaigns').findOne({ _id: campaign._id });
+      if (campaign.status === 'paused') {
+        activeCampaigns.set(String(campaign._id), {
+          ...activeCampaigns.get(String(campaign._id)),
+          status: 'paused'
+        });
+        console.log(`Campaign ${campaignId} paused at message ${i}`);
+        return; // Salir sin marcar como completada
+      }
+
+      const contact = contacts[i];
+      
+      try {
+        // 🚨 CRÍTICO: Validar que no haya hecho opt-out durante la campaña
+        const recentOptOut = await db.collection('opt_outs').findOne({ numero: contact.numero });
+        if (recentOptOut) {
+          console.log(`⚠️ Skipping ${contact.numero}: opted out during campaign`);
+          skippedCount++;
+          continue; // Saltar este contacto
+        }
+
+        const result = await sendSingleMessage(
+          db,
+          String(campaign.userId),
+          contact.numero,
+          template,
+          batchId,
+          creds
+        );
+
+        if (result.skipped) {
+          skippedCount++;
+          console.log(`⚠️ Skipped ${contact.numero}: ${result.error}`);
+        } else if (result.success) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+
+        // Actualizar progreso en DB cada 10 mensajes
+        if (i % 10 === 0 || i === contacts.length - 1) {
+          await db.collection('campaigns').updateOne(
+            { _id: campaign._id },
+            { 
+              $set: { 
+                processed: i + 1,
+                successCount,
+                failedCount,
+                skippedCount, // 🚨 NUEVO
+                lastProcessedAt: new Date().toISOString()
+              } 
+            }
+          );
+
+          // Actualizar en memoria
+          activeCampaigns.set(String(campaign._id), {
+            total: contacts.length,
+            processed: i + 1,
+            success: successCount,
+            failed: failedCount,
+            skipped: skippedCount, // 🚨 NUEVO
+            status: 'processing'
+          });
+        }
+
+        // Delay progresivo basado en volumen
+        const delay = i < 100 ? 1200 : i < 500 ? 800 : i < 2000 ? 600 : 400;
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+      } catch (err) {
+        console.error(`Error sending to ${contact.numero}:`, err);
+        failedCount++;
+        
+        // Si hay muchos errores seguidos, pausar para investigar
+        if (failedCount > 50 && failedCount > successCount * 0.5) {
+          await db.collection('campaigns').updateOne(
+            { _id: campaign._id },
+            { 
+              $set: { 
+                status: 'paused',
+                error: 'too_many_failures',
+                processed: i + 1,
+                successCount,
+                failedCount,
+                skippedCount, // 🚨 NUEVO
+                pausedAt: new Date().toISOString()
+              } 
+            }
+          );
+          console.warn(`Campaign ${campaignId} auto-paused due to high failure rate`);
+          return;
+        }
+      }
+    }
+
+    // Marcar como completada
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { 
+        $set: { 
+          status: 'completed',
+          processed: contacts.length,
+          successCount,
+          failedCount,
+          skippedCount, // 🚨 NUEVO
+          completedAt: new Date().toISOString()
+        } 
+      }
+    );
+
+    // Remover de memoria
+    activeCampaigns.delete(String(campaign._id));
+    console.log(`Campaign ${campaignId} completed: ${successCount} success, ${failedCount} failed, ${skippedCount} skipped`);
+
+  } catch (err) {
+    console.error(`Campaign ${campaignId} processing error:`, err);
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { 
+        $set: { 
+          status: 'failed',
+          error: String(err),
+          completedAt: new Date().toISOString()
+        } 
+      }
+    );
+    activeCampaigns.delete(String(campaign._id));
+  }
+}
+
+// Crear campaña en background
+app.post('/api/campaigns/create', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const { contacts, template, campaignName, batchId } = req.body || {};
+
+    if (!Array.isArray(contacts) || contacts.length === 0) {
+      return res.status(400).json({ error: 'contacts_required' });
+    }
+
+    if (contacts.length > 10000) {
+      return res.status(400).json({ error: 'too_many_contacts', max: 10000 });
+    }
+
+    if (!template || typeof template !== 'object') {
+      return res.status(400).json({ error: 'template_required' });
+    }
+
+    // Verificar credenciales
+    const user = await db.collection('users').findOne({ _id: userIdObj });
+    const creds = user?.metaCreds || {};
+    if (!creds.accessToken || !creds.phoneNumberId) {
+      return res.status(400).json({ error: 'missing_meta_credentials' });
+    }
+
+    // Crear documento de campaña
+    const campaign = {
+      userId: userIdObj,
+      campaignName: campaignName || `Campaña ${new Date().toLocaleString('es-CO')}`,
+      batchId: batchId || crypto.randomBytes(16).toString('hex'),
+      template,
+      contacts,
+      status: 'pending',
+      processed: 0,
+      successCount: 0,
+      failedCount: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = await db.collection('campaigns').insertOne(campaign);
+    const campaignId = String(result.insertedId);
+
+    // Iniciar procesamiento en background (no bloquea la respuesta)
+    setImmediate(() => processCampaignBackground(campaignId));
+
+    return res.json({
+      ok: true,
+      campaignId,
+      status: 'pending',
+      total: contacts.length,
+      message: 'Campaña creada y procesándose en segundo plano'
+    });
+
+  } catch (err) {
+    console.error('/api/campaigns/create error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
+// Obtener estado de una campaña
+app.get('/api/campaigns/:id/status', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const campaignId = req.params.id;
+    
+    // Primero verificar en memoria (más rápido)
+    const memStatus = activeCampaigns.get(campaignId);
+    
+    // Luego obtener de DB (fuente de verdad)
+    const campaign = await db.collection('campaigns').findOne(
+      { _id: new ObjectId(campaignId), userId: new ObjectId(req.userId) },
+      { projection: { contacts: 0 } } // No enviar lista completa de contactos
+    );
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign_not_found' });
+    }
+
+    return res.json({
+      ...campaign,
+      inMemory: memStatus || null,
+      _id: String(campaign._id),
+      userId: String(campaign.userId)
+    });
+
+  } catch (err) {
+    console.error('/api/campaigns/:id/status error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Listar campañas del usuario
+app.get('/api/campaigns', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+    const status = req.query.status ? String(req.query.status) : null;
+    
+    const filter = { userId: new ObjectId(req.userId) };
+    if (status) filter.status = status;
+
+    const campaigns = await db.collection('campaigns')
+      .find(filter, { projection: { contacts: 0, template: 0 } })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .toArray();
+
+    return res.json({
+      data: campaigns.map(c => ({
+        ...c,
+        _id: String(c._id),
+        userId: String(c.userId),
+        contactsCount: c.contacts?.length || 0
+      }))
+    });
+
+  } catch (err) {
+    console.error('/api/campaigns error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Pausar campaña
+app.post('/api/campaigns/:id/pause', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const campaignId = req.params.id;
+
+    const campaign = await db.collection('campaigns').findOne({
+      _id: new ObjectId(campaignId),
+      userId: new ObjectId(req.userId)
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign_not_found' });
+    }
+
+    if (campaign.status !== 'processing' && campaign.status !== 'pending') {
+      return res.status(400).json({ error: 'campaign_not_active' });
+    }
+
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { $set: { status: 'paused', pausedAt: new Date().toISOString() } }
+    );
+
+    return res.json({ ok: true, status: 'paused' });
+
+  } catch (err) {
+    console.error('/api/campaigns/:id/pause error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Reanudar campaña
+app.post('/api/campaigns/:id/resume', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const campaignId = req.params.id;
+
+    const campaign = await db.collection('campaigns').findOne({
+      _id: new ObjectId(campaignId),
+      userId: new ObjectId(req.userId)
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign_not_found' });
+    }
+
+    if (campaign.status !== 'paused') {
+      return res.status(400).json({ error: 'campaign_not_paused' });
+    }
+
+    // Reanudar desde donde se quedó
+    const remainingContacts = campaign.contacts.slice(campaign.processed || 0);
+    
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { 
+        $set: { 
+          status: 'pending',
+          contacts: remainingContacts,
+          resumedAt: new Date().toISOString()
+        } 
+      }
+    );
+
+    // Reiniciar procesamiento
+    setImmediate(() => processCampaignBackground(campaignId));
+
+    return res.json({ ok: true, status: 'processing', remaining: remainingContacts.length });
+
+  } catch (err) {
+    console.error('/api/campaigns/:id/resume error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Cancelar campaña
+app.post('/api/campaigns/:id/cancel', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const campaignId = req.params.id;
+
+    const campaign = await db.collection('campaigns').findOne({
+      _id: new ObjectId(campaignId),
+      userId: new ObjectId(req.userId)
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'campaign_not_found' });
+    }
+
+    if (campaign.status === 'completed' || campaign.status === 'cancelled') {
+      return res.status(400).json({ error: 'campaign_already_finished' });
+    }
+
+    await db.collection('campaigns').updateOne(
+      { _id: campaign._id },
+      { $set: { status: 'cancelled', cancelledAt: new Date().toISOString() } }
+    );
+
+    activeCampaigns.delete(campaignId);
+
+    return res.json({ ok: true, status: 'cancelled' });
+
+  } catch (err) {
+    console.error('/api/campaigns/:id/cancel error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Recuperar campañas pendientes al reiniciar el servidor
+(async function recoverPendingCampaigns() {
+  try {
+    const db = await getDb();
+    const pending = await db.collection('campaigns')
+      .find({ status: { $in: ['pending', 'processing'] } })
+      .toArray();
+    
+    for (const campaign of pending) {
+      const campaignId = String(campaign._id);
+      console.log(`Recovering campaign ${campaignId}...`);
+      setImmediate(() => processCampaignBackground(campaignId));
+    }
+    
+    if (pending.length > 0) {
+      console.log(`Recovered ${pending.length} pending campaigns`);
+    }
+  } catch (err) {
+    console.error('Error recovering campaigns:', err);
+  }
+})();
+
 // Obtener últimos logs de envío (limit 50) para inspección rápida
 app.get('/api/wa/send-logs', requireUser, async (req, res) => {
   try {
@@ -692,6 +1374,220 @@ app.get('/api/wa/send-logs', requireUser, async (req, res) => {
     return res.json(logs);
   } catch (err) {
     return res.status(500).json({ error: 'logs_error', detail: String(err) });
+  }
+});
+
+// --- 🚨 ENDPOINTS DE OPT-OUT (Gestión de lista de exclusión) ---
+// Listar contactos con opt-out
+app.get('/api/opt-outs', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const limit = Math.min(Number(req.query.limit || 100), 500);
+    
+    const optOuts = await db.collection('opt_outs')
+      .find({ 
+        $or: [
+          { userId: userIdObj },
+          { userId: { $exists: false } } // Incluir globales
+        ]
+      })
+      .sort({ optOutDate: -1 })
+      .limit(limit)
+      .toArray();
+    
+    return res.json({ data: optOuts, total: optOuts.length });
+  } catch (err) {
+    console.error('/api/opt-outs GET error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Agregar opt-out manualmente (por si usuario lo solicita por otro canal)
+app.post('/api/opt-outs', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const { numero, reason } = req.body || {};
+    
+    if (!numero || typeof numero !== 'string') {
+      return res.status(400).json({ error: 'numero_required' });
+    }
+    
+    const numeroClean = String(numero).replace(/\D+/g, '');
+    if (!numeroClean) {
+      return res.status(400).json({ error: 'invalid_numero' });
+    }
+    
+    await db.collection('opt_outs').updateOne(
+      { userId: userIdObj, numero: numeroClean },
+      { 
+        $set: { 
+          numero: numeroClean,
+          userId: userIdObj,
+          optOutDate: new Date().toISOString(),
+          reason: reason || 'manual_entry',
+          source: 'manual'
+        } 
+      },
+      { upsert: true }
+    );
+    
+    // Marcar contacto como opt-out
+    await db.collection('contacts').updateMany(
+      { userId: userIdObj, numero: numeroClean },
+      { $set: { optedOut: true, optOutDate: new Date().toISOString() } }
+    );
+    
+    return res.json({ ok: true, numero: numeroClean });
+  } catch (err) {
+    console.error('/api/opt-outs POST error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Remover opt-out (si usuario solicita reactivación y da consentimiento nuevamente)
+app.delete('/api/opt-outs/:numero', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const numero = String(req.params.numero).replace(/\D+/g, '');
+    
+    if (!numero) {
+      return res.status(400).json({ error: 'invalid_numero' });
+    }
+    
+    const result = await db.collection('opt_outs').deleteOne({ userId: userIdObj, numero });
+    
+    // Actualizar contactos
+    await db.collection('contacts').updateMany(
+      { userId: userIdObj, numero },
+      { $set: { optedOut: false }, $unset: { optOutDate: '' } }
+    );
+    
+    return res.json({ ok: true, deleted: result.deletedCount });
+  } catch (err) {
+    console.error('/api/opt-outs DELETE error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Verificar si un número tiene opt-out
+app.get('/api/opt-outs/check/:numero', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const numero = String(req.params.numero).replace(/\D+/g, '');
+    
+    if (!numero) {
+      return res.status(400).json({ error: 'invalid_numero' });
+    }
+    
+    const optOut = await db.collection('opt_outs').findOne({
+      numero,
+      $or: [
+        { userId: userIdObj },
+        { userId: { $exists: false } }
+      ]
+    });
+    
+    return res.json({ hasOptOut: !!optOut, optOut: optOut || null });
+  } catch (err) {
+    console.error('/api/opt-outs/check error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// --- 🚨 QUALITY RATING & TIER LIMITS ---
+// Consultar Quality Rating y límites de la cuenta WhatsApp
+app.get('/api/wa/quality-rating', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(req.userId) });
+    const creds = user?.metaCreds || {};
+    
+    if (!creds.phoneNumberId || !creds.accessToken) {
+      return res.status(400).json({ error: 'missing_meta_credentials' });
+    }
+
+    // Consultar información del phone number (incluye quality_rating)
+    const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,messaging_limit_tier,name_status,code_verification_status`;
+    const r = await fetch(url, { 
+      headers: { Authorization: `Bearer ${creds.accessToken}` } 
+    });
+    
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      let detail;
+      try { detail = JSON.parse(text); } catch { detail = text; }
+      return res.status(r.status).json({ error: 'graph_error', detail });
+    }
+
+    const data = await r.json();
+    
+    // Guardar en DB para histórico y alertas
+    await db.collection('quality_checks').insertOne({
+      userId: new ObjectId(req.userId),
+      phoneNumberId: creds.phoneNumberId,
+      quality_rating: data.quality_rating || 'UNKNOWN',
+      messaging_limit_tier: data.messaging_limit_tier || 'TIER_NOT_SET',
+      display_phone_number: data.display_phone_number,
+      verified_name: data.verified_name,
+      checkedAt: new Date().toISOString()
+    });
+
+    // 🚨 ALERTAS AUTOMÁTICAS si quality no es GREEN
+    if (data.quality_rating && data.quality_rating !== 'GREEN') {
+      await db.collection('activities').insertOne({
+        userId: new ObjectId(req.userId),
+        title: `⚠️ Quality Rating: ${data.quality_rating}`,
+        description: `Tu Quality Rating está en ${data.quality_rating}. Revisa tus mensajes para evitar que Meta limite tu cuenta.`,
+        type: 'warning',
+        timestamp: new Date().toISOString(),
+        metadata: { quality_rating: data.quality_rating, source: 'auto_check' }
+      });
+    }
+
+    return res.json({
+      ...data,
+      tierLimits: {
+        TIER_NOT_SET: '50 conversaciones/día (nuevo)',
+        TIER_1: '1,000 conversaciones/día',
+        TIER_2: '10,000 conversaciones/día',
+        TIER_3: '100,000 conversaciones/día',
+        TIER_4: 'Unlimited (nivel enterprise)'
+      },
+      qualityInfo: {
+        GREEN: '✅ Excelente - Sin restricciones',
+        YELLOW: '⚠️ Advertencia - Revisa contenido',
+        RED: '🚨 Crítico - Límites severos o baneo cercano',
+        UNKNOWN: '❓ No disponible - Verificar credenciales'
+      }
+    });
+
+  } catch (err) {
+    console.error('/api/wa/quality-rating error', err);
+    return res.status(500).json({ error: 'server_error', detail: String(err) });
+  }
+});
+
+// Histórico de quality checks
+app.get('/api/wa/quality-history', requireUser, async (req, res) => {
+  try {
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+    
+    const history = await db.collection('quality_checks')
+      .find({ userId: userIdObj })
+      .sort({ checkedAt: -1 })
+      .limit(limit)
+      .toArray();
+    
+    return res.json({ data: history });
+  } catch (err) {
+    console.error('/api/wa/quality-history error', err);
+    return res.status(500).json({ error: 'server_error' });
   }
 });
 

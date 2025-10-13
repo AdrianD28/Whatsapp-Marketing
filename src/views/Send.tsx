@@ -1,27 +1,32 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Send as SendIcon, Play, Pause, Users, Settings, Eye } from 'lucide-react';
+import { Send as SendIcon, Play, Pause, Users, Settings, Eye, Activity } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { useAppContext } from '../context/AppContext';
 import { useApi } from '../hooks/useApi';
+import { useCampaigns } from '../hooks/useCampaigns';
 import toast from 'react-hot-toast';
 import { HelpTooltip } from '../components/ui/HelpTooltip';
 import { Modal } from '../components/ui/Modal';
+import { CampaignMonitor } from '../components/campaigns/CampaignMonitor';
 
 interface SendFormData {
   templateName: string;
   delay: number;
   headerImageUrl?: string;
   headerImageFile?: FileList;
+  useBackgroundMode?: boolean;
+  campaignName?: string;
 }
 
 export function Send() {
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
+  const [showMonitor, setShowMonitor] = useState(false);
   const [checklistConfirmed, setChecklistConfirmed] = useState(false);
   const [checkOptIn, setCheckOptIn] = useState(false);
   const [checkOptOut, setCheckOptOut] = useState(false);
@@ -30,8 +35,9 @@ export function Send() {
   const [pendingData, setPendingData] = useState<SendFormData | null>(null);
   const { templates, contacts, sendProgress, setSendProgress, apiCredentials, addActivity, addSendSession } = useAppContext();
   const { sendMessage } = useApi(apiCredentials);
+  const { createCampaign } = useCampaigns();
   const { register, handleSubmit, watch, formState: { errors } } = useForm<SendFormData>({
-    defaultValues: { delay: 5 }
+    defaultValues: { delay: 5, useBackgroundMode: false }
   });
 
   const approvedTemplates = templates.filter(t => t.status === 'APPROVED');
@@ -122,6 +128,88 @@ export function Send() {
     if (!selectedTemplate) {
       toast.error('Selecciona una plantilla válida');
       return;
+    }
+
+    // NUEVO: Si hay más de 100 contactos, ofrecer modo background
+    if (contacts.length > 100 && !data.useBackgroundMode) {
+      const useBackground = confirm(
+        `Tienes ${contacts.length} contactos.\n\n` +
+        `¿Deseas usar el modo BACKGROUND?\n\n` +
+        `✅ No requiere mantener el navegador abierto\n` +
+        `✅ Puedes pausar/reanudar en cualquier momento\n` +
+        `✅ Reintentos automáticos\n` +
+        `✅ Monitoreo en tiempo real\n\n` +
+        `Presiona OK para usar modo background, o Cancelar para envío normal.`
+      );
+      
+      if (useBackground) {
+        data.useBackgroundMode = true;
+      }
+    }
+
+    // NUEVO: Modo background para campañas grandes
+    if (data.useBackgroundMode) {
+      try {
+        const campaignName = data.campaignName || `Campaña ${selectedTemplate.name} - ${new Date().toLocaleString('es-CO')}`;
+        const batchId = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        // Construir template object con parámetros mapeados
+        const bodyComponent = selectedTemplate.components.find(c => c.type === 'BODY');
+        const parameters = bodyComponent?.text?.match(/\{\{(\d+)\}\}/g);
+        
+        const templateForBackend = {
+          name: selectedTemplate.name,
+          language: { code: selectedTemplate.language },
+          components: selectedTemplate.components.map(comp => {
+            if (comp.type === 'BODY' && parameters) {
+              return {
+                type: 'BODY',
+                parameters: parameters.map(p => {
+                  const index = p.replace(/\{\{|\}\}/g, '');
+                  const mapKey = `body:${index}`;
+                  const field = paramMap[mapKey];
+                  const fallback = index === '1' ? 'Nombre' : 'Numero';
+                  return { 
+                    type: 'text',
+                    text: `{{${field || fallback}}}` // Placeholder que el servidor reemplazará
+                  };
+                })
+              };
+            }
+            return comp;
+          })
+        };
+
+        // Preparar contactos con todos los campos necesarios
+        const contactsForBackend = contacts.map(c => ({
+          numero: String(c.Numero || '').replace(/[^\d]/g, '').replace(/^00/, ''),
+          Nombre: c.Nombre || '',
+          ...c
+        }));
+
+        const result = await createCampaign({
+          contacts: contactsForBackend,
+          template: templateForBackend,
+          campaignName,
+          batchId
+        });
+
+        toast.success(`Campaña creada: ${result.total} mensajes en cola`);
+        addActivity({
+          title: 'Campaña en segundo plano iniciada',
+          description: `${result.total} mensajes procesándose en background`,
+          type: 'success',
+        });
+
+        // Abrir monitor automáticamente
+        setShowMonitor(true);
+        return;
+
+      } catch (err: any) {
+        console.error('Error creating background campaign:', err);
+        toast.error(err.message || 'Error al crear campaña en background');
+        return;
+      }
     }
 
     // Validar si la plantilla requiere HEADER de tipo IMAGE
@@ -405,10 +493,24 @@ export function Send() {
       className="space-y-6"
     >
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-white">Envío Masivo</h2>
-        <p className="text-gray-400 mt-1">Configura y ejecuta campañas de mensajes</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Envío Masivo</h2>
+          <p className="text-gray-400 mt-1">Configura y ejecuta campañas de mensajes</p>
+        </div>
+        <Button
+          variant="secondary"
+          icon={Activity}
+          onClick={() => setShowMonitor(!showMonitor)}
+        >
+          {showMonitor ? 'Ocultar' : 'Ver'} Monitor
+        </Button>
       </div>
+
+      {/* Campaign Monitor */}
+      {showMonitor && (
+        <CampaignMonitor onClose={() => setShowMonitor(false)} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Form */}
