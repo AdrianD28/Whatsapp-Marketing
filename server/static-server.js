@@ -658,7 +658,12 @@ app.post('/api/admin/credits', requireAdmin, async (req, res) => {
   try {
     const { userId, amount, reason } = req.body;
     
+    console.log('📋 POST /api/admin/credits request:', { userId, amount, reason });
+    console.log('👤 Admin user:', req.user);
+    console.log('🆔 Admin userId:', req.userId);
+    
     if (!userId || typeof amount !== 'number') {
+      console.error('❌ Missing userId or amount:', { userId, amount, typeOfAmount: typeof amount });
       return res.status(400).json({ error: 'userId_and_amount_required' });
     }
     
@@ -680,7 +685,7 @@ app.post('/api/admin/credits', requireAdmin, async (req, res) => {
     // Log de transacción (opcional, puedes crear una colección credit_logs)
     await db.collection('credit_logs').insertOne({
       userId: new ObjectId(userId),
-      adminId: new ObjectId(req.user._id),
+      adminId: new ObjectId(req.userId),
       amount,
       previousCredits: currentCredits,
       newCredits,
@@ -697,7 +702,7 @@ app.post('/api/admin/credits', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('POST /api/admin/credits error:', err);
-    return res.status(500).json({ error: 'server_error' });
+    return res.status(500).json({ error: 'server_error', message: err.message });
   }
 });
 

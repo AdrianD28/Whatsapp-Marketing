@@ -15,6 +15,7 @@ import { Button } from '../ui/Button';
 interface SidebarProps {
   currentView: string;
   onViewChange: (view: string) => void;
+  userRole?: string;
 }
 
 const menuItems = [
@@ -27,12 +28,22 @@ const menuItems = [
 
 const adminMenuItem = { id: 'admin', label: 'Administración', icon: Shield };
 
-export function Sidebar({ currentView, onViewChange }: SidebarProps) {
+export function Sidebar({ currentView, onViewChange, userRole: propUserRole }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [userRole, setUserRole] = useState<string>('user');
+  const [userRole, setUserRole] = useState<string>(propUserRole || 'user');
 
-  // Obtener rol del usuario
+  // Actualizar userRole cuando cambia la prop
   useEffect(() => {
+    if (propUserRole) {
+      setUserRole(propUserRole);
+      console.log('🔑 Sidebar - Rol actualizado desde prop:', propUserRole);
+    }
+  }, [propUserRole]);
+
+  // Obtener rol del usuario (fallback si no viene por prop)
+  useEffect(() => {
+    if (propUserRole) return; // Si viene por prop, no hacer fetch
+    
     const loadUserRole = async () => {
       try {
         const token = localStorage.getItem('auth_token');
@@ -48,7 +59,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         if (res.ok) {
           const data = await res.json();
           const role = data.user?.role || 'user';
-          console.log('🔑 Rol del usuario:', role);
+          console.log('🔑 Sidebar - Rol cargado desde API:', role);
           setUserRole(role);
         } else {
           setUserRole('user');
@@ -59,7 +70,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
       }
     };
     loadUserRole();
-  }, []);
+  }, [propUserRole]);
 
   // Agregar admin menu si es admin o super_admin
   const allMenuItems = userRole === 'admin' || userRole === 'super_admin' 

@@ -29,6 +29,7 @@ function AppContent() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userCredits, setUserCredits] = useState<number | undefined>(undefined);
+  const [userRole, setUserRole] = useState<string>('user');
   const [hasToken, setHasToken] = useState<boolean>(() => {
     try { return !!localStorage.getItem('auth_token'); } catch { return false; }
   });
@@ -45,16 +46,33 @@ function AppContent() {
   // Cargar info del usuario si hay token en localStorage
   useEffect(() => {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
-    if (!token) { setUserEmail(null); setUserCredits(undefined); setHasToken(false); return; }
+    if (!token) { 
+      setUserEmail(null); 
+      setUserCredits(undefined); 
+      setUserRole('user');
+      setHasToken(false); 
+      return; 
+    }
     setHasToken(true);
     (async () => {
       try {
         const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        if (!r.ok) { setUserEmail(null); setUserCredits(undefined); return; }
+        if (!r.ok) { 
+          setUserEmail(null); 
+          setUserCredits(undefined); 
+          setUserRole('user');
+          return; 
+        }
         const j = await r.json();
         setUserEmail(j?.user?.email ?? null);
         setUserCredits(j?.user?.credits ?? 0);
-      } catch { setUserEmail(null); setUserCredits(undefined); }
+        setUserRole(j?.user?.role ?? 'user');
+        console.log('👤 Usuario cargado:', j?.user);
+      } catch { 
+        setUserEmail(null); 
+        setUserCredits(undefined); 
+        setUserRole('user');
+      }
     })();
   }, [showAuthModal, hasToken]);
 
@@ -149,13 +167,21 @@ function AppContent() {
     <div className="min-h-screen bg-gray-900 flex">
       {/* Sidebar desktop */}
       <div className="hidden md:block">
-        <Sidebar currentView={currentView} onViewChange={(view) => { setCurrentView(view); }} />
+        <Sidebar 
+          currentView={currentView} 
+          onViewChange={(view) => { setCurrentView(view); }} 
+          userRole={userRole}
+        />
       </div>
       {/* Sidebar móvil como drawer */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 flex md:hidden">
           <div className="relative w-72 max-w-[80%]">
-            <Sidebar currentView={currentView} onViewChange={(view) => { setCurrentView(view); setSidebarOpen(false); }} />
+            <Sidebar 
+              currentView={currentView} 
+              onViewChange={(view) => { setCurrentView(view); setSidebarOpen(false); }} 
+              userRole={userRole}
+            />
           </div>
           <div
             className="flex-1 bg-black/50"
@@ -193,7 +219,7 @@ function AppContent() {
                 </button>
               </div>
             </div>
-          ) : !apiCredentials ? (
+          ) : (currentView !== 'admin' && !apiCredentials) ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-4">
                 <p className="text-gray-300 text-lg font-medium">Configura tus credenciales de Meta</p>
