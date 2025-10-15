@@ -245,16 +245,16 @@ export function Admin() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="space-y-6"
+      className="space-y-4 sm:space-y-6 p-4 sm:p-0"
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Shield className="w-6 h-6 text-blue-400" />
+          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <Shield className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400" />
             Panel de Administración
           </h2>
-          <p className="text-gray-400 text-sm mt-1">
+          <p className="text-gray-400 text-xs sm:text-sm mt-1">
             Gestiona usuarios y créditos del sistema
           </p>
         </div>
@@ -262,13 +262,15 @@ export function Admin() {
           variant="primary"
           icon={Plus}
           onClick={() => setShowCreateUser(true)}
+          size="sm"
+          className="w-full sm:w-auto"
         >
           Crear Usuario
         </Button>
       </div>
 
       {/* Estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         <Card>
           <div className="flex items-center justify-between">
             <div>
@@ -304,80 +306,80 @@ export function Admin() {
 
       {/* Tabla de usuarios */}
       <Card>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto -mx-4 sm:mx-0">
           {users.length === 0 ? (
-            <div className="text-center py-12">
-              <Users className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400 text-lg mb-2">No hay usuarios registrados</p>
-              <p className="text-gray-500 text-sm">Crea el primer usuario para comenzar</p>
+            <div className="text-center py-8 sm:py-12 px-4">
+              <Users className="w-12 h-12 sm:w-16 sm:h-16 text-gray-600 mx-auto mb-3 sm:mb-4" />
+              <p className="text-gray-400 text-base sm:text-lg mb-2">No hay usuarios registrados</p>
+              <p className="text-gray-500 text-xs sm:text-sm">Crea el primer usuario para comenzar</p>
             </div>
           ) : (
-            <table className="w-full">
+            <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-gray-700">
-                <th className="text-left py-3 px-4 text-gray-400 font-medium">Usuario</th>
-                <th className="text-left py-3 px-4 text-gray-400 font-medium">Rol</th>
-                <th className="text-right py-3 px-4 text-gray-400 font-medium">Créditos</th>
-                <th className="text-left py-3 px-4 text-gray-400 font-medium">Creado</th>
-                <th className="text-right py-3 px-4 text-gray-400 font-medium">Acciones</th>
+                <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Usuario</th>
+                <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Rol</th>
+                <th className="text-right py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Créditos</th>
+                <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm hidden md:table-cell">Creado</th>
+                <th className="text-right py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <tr key={user._id} className="border-b border-gray-700/50 hover:bg-gray-800/30">
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
                       {getRoleIcon(user.role)}
-                      <span className="text-white">{user.email}</span>
+                      <span className="text-white text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">{user.email}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-4">
-                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium border ${getRoleBadge(user.role)}`}>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-medium border ${getRoleBadge(user.role)}`}>
                       {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Admin' : 'Usuario'}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right">
-                    <span className={`font-semibold ${
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-right">
+                    <span className={`font-semibold text-xs sm:text-sm ${
                       user.credits === 0 ? 'text-red-400' : 
                       user.credits < 100 ? 'text-yellow-400' : 
                       'text-green-400'
                     }`}>
-                      {user.credits.toLocaleString()}
+                      {user.credits > 999 ? `${(user.credits/1000).toFixed(1)}k` : user.credits.toLocaleString()}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-gray-400 text-sm">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-gray-400 text-xs sm:text-sm hidden md:table-cell">
                     {new Date(user.createdAt).toLocaleDateString('es-CO')}
                   </td>
-                  <td className="py-3 px-4">
-                    <div className="flex items-center justify-end gap-2">
+                  <td className="py-2 sm:py-3 px-2 sm:px-4">
+                    <div className="flex items-center justify-end gap-1 sm:gap-2">
                       <button
                         onClick={() => {
                           setSelectedUser(user);
                           setShowAddCredits(true);
                         }}
-                        className="p-1.5 rounded hover:bg-green-900/30 text-green-400 transition-colors"
+                        className="p-1 sm:p-1.5 rounded hover:bg-green-900/30 text-green-400 transition-colors"
                         title="Agregar créditos"
                       >
-                        <Coins className="w-4 h-4" />
+                        <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                       </button>
                       
                       {user.role !== 'super_admin' && currentUserRole === 'super_admin' && (
                         <button
                           onClick={() => handleChangeRole(user._id, user.role === 'admin' ? 'user' : 'admin')}
-                          className="p-1.5 rounded hover:bg-blue-900/30 text-blue-400 transition-colors"
+                          className="p-1 sm:p-1.5 rounded hover:bg-blue-900/30 text-blue-400 transition-colors"
                           title="Cambiar rol"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </button>
                       )}
                       
                       {user.role !== 'super_admin' && (
                         <button
                           onClick={() => handleDeleteUser(user._id, user.email)}
-                          className="p-1.5 rounded hover:bg-red-900/30 text-red-400 transition-colors"
+                          className="p-1 sm:p-1.5 rounded hover:bg-red-900/30 text-red-400 transition-colors"
                           title="Eliminar usuario"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         </button>
                       )}
                     </div>

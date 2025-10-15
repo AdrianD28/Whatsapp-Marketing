@@ -65,9 +65,9 @@ export function Header({
           />
         )}
 
-        <div className="relative flex items-center gap-2 sm:gap-3">
+        <div className="relative flex items-center gap-1.5 sm:gap-2 md:gap-3 flex-shrink-0">
           {!isAuthenticated ? (
-            <Button variant="primary" size="sm" icon={LogIn} onClick={onLogin}>
+            <Button variant="primary" size="sm" icon={LogIn} onClick={onLogin} className="hidden xs:flex">
               Login
             </Button>
           ) : (
@@ -76,7 +76,7 @@ export function Header({
               {credits !== undefined && (
                 <button
                   onClick={() => setShowCreditsModal(true)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold transition-all cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 ${
+                  className={`flex items-center gap-1 px-2 py-1.5 sm:px-3 sm:py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-all cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-gray-800 ${
                     credits === 0 
                       ? 'bg-red-900/30 text-red-300 border border-red-800 hover:bg-red-900/40 focus:ring-red-600' 
                       : credits < 100 
@@ -86,44 +86,55 @@ export function Header({
                   title="Ver información de créditos"
                   aria-label={`Créditos disponibles: ${credits}. Click para ver más información`}
                 >
-                  <Coins className="w-4 h-4" />
-                  <span className="hidden sm:inline">{credits.toLocaleString()}</span>
-                  <span className="sm:hidden">{credits > 999 ? `${(credits/1000).toFixed(1)}k` : credits}</span>
+                  <Coins className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span className="hidden md:inline">{credits.toLocaleString()}</span>
+                  <span className="md:hidden">{credits > 999 ? `${(credits/1000).toFixed(1)}k` : credits}</span>
                 </button>
               )}
               
               <button
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-gray-500"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-gray-500"
                 onClick={() => setOpenMenu(v => !v)}
               >
-                <User2 className="w-4 h-4" />
-                <span className="hidden sm:inline max-w-[180px] truncate">{userEmail || 'Mi cuenta'}</span>
-                <ChevronDown className={`w-4 h-4 transition-transform ${openMenu ? 'rotate-180' : ''}`} />
+                <User2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="hidden lg:inline max-w-[120px] xl:max-w-[180px] truncate">{userEmail || 'Cuenta'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform ${openMenu ? 'rotate-180' : ''}`} />
               </button>
               {openMenu && (
-                <div className="absolute right-0 top-10 z-20 min-w-[180px] rounded-md border border-gray-700 bg-gray-800 shadow-xl">
-                  <button className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2" onClick={() => { setOpenMenu(false); onSettings(); }}>
+                <div className="absolute right-0 top-full mt-2 z-20 min-w-[180px] rounded-md border border-gray-700 bg-gray-800 shadow-xl">
+                  <button className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2 rounded-t-md" onClick={() => { setOpenMenu(false); onSettings(); }}>
                     <Settings className="w-4 h-4" /> Mi cuenta
                   </button>
-                  <button className="w-full text-left px-4 py-2 text-sm text-red-300 hover:bg-red-900/30 flex items-center gap-2" onClick={() => { setOpenMenu(false); onLogout && onLogout(); }}>
+                  <button className="w-full text-left px-4 py-2 text-sm text-red-300 hover:bg-red-900/30 flex items-center gap-2 rounded-b-md" onClick={() => { setOpenMenu(false); onLogout && onLogout(); }}>
                     <LogOut className="w-4 h-4" /> Cerrar sesión
                   </button>
                 </div>
               )}
             </>
           )}
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={RefreshCw}
-            onClick={onRefresh}
-            loading={loading}
-          >
-            Actualizar
-          </Button>
-          <Button variant="ghost" size="sm" icon={Settings} onClick={onSettings}>
-            Configurar
-          </Button>
+          
+          {/* Botones de acción - ocultos en móvil pequeño */}
+          <div className="hidden sm:flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={RefreshCw}
+              onClick={onRefresh}
+              loading={loading}
+              className="hidden md:flex"
+            >
+              Actualizar
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              icon={Settings} 
+              onClick={onSettings}
+              className="hidden lg:flex"
+            >
+              Configurar
+            </Button>
+          </div>
         </div>
       </div>
 

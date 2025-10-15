@@ -2258,9 +2258,38 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
 app.listen(port, async () => {
   console.log(`Static server listening on http://localhost:${port}`);
   
-  // 🚨 CRÍTICO: Inicializar super admin al arrancar el servidor
   try {
     const db = await getDb();
+    
+    // 🚨 MIGRACIÓN: Asignar rol "user" a usuarios sin rol
+    console.log('🔧 Verificando roles de usuarios...');
+    const usersWithoutRole = await db.collection('users').find({ 
+      $or: [
+        { role: { $exists: false } },
+        { role: null }
+      ]
+    }).toArray();
+    
+    if (usersWithoutRole.length > 0) {
+      console.log(`📋 Encontrados ${usersWithoutRole.length} usuarios sin rol. Asignando rol "user"...`);
+      
+      for (const user of usersWithoutRole) {
+        await db.collection('users').updateOne(
+          { _id: user._id },
+          { 
+            $set: { 
+              role: 'user',
+              updatedAt: new Date().toISOString()
+            } 
+          }
+        );
+        console.log(`   ✅ ${user.email} → role: "user"`);
+      }
+    } else {
+      console.log('✅ Todos los usuarios tienen rol asignado');
+    }
+    
+    // 🚨 CRÍTICO: Inicializar super admin al arrancar el servidor
     const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@example.com';
     const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
     
@@ -2292,7 +2321,7 @@ app.listen(port, async () => {
       console.log(`✅ Super admin already exists: ${superAdminEmail} (role: ${existing.role})`);
     }
   } catch (err) {
-    console.error('❌ Error initializing super admin:', err);
+    console.error('❌ Error initializing server:', err);
   }
 });
 

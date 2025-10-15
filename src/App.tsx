@@ -36,7 +36,7 @@ function AppContent() {
   const { fetchTemplates, loading } = useApi(apiCredentials);
 
   useEffect(() => {
-    // Cargar datos solo si hay token y credenciales
+    // Cargar datos solo si hay token y credenciales (excepto para vista admin)
     if (hasToken && apiCredentials) {
       loadInitialData();
     }
@@ -108,6 +108,10 @@ function AppContent() {
     if (!hasToken) {
       setShowAuthModal(true);
     } else {
+      // No abrir modal de credenciales si estamos en vista admin
+      if (currentView === 'admin') {
+        return; // Admin no necesita credenciales de Meta
+      }
       setShowCredentialsModal(true);
     }
   };

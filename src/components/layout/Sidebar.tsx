@@ -36,7 +36,10 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     const loadUserRole = async () => {
       try {
         const token = localStorage.getItem('auth_token');
-        if (!token) return;
+        if (!token) {
+          setUserRole('user');
+          return;
+        }
         
         const res = await fetch('/api/auth/me', {
           headers: { Authorization: `Bearer ${token}` }
@@ -44,10 +47,15 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         
         if (res.ok) {
           const data = await res.json();
-          setUserRole(data.user?.role || 'user');
+          const role = data.user?.role || 'user';
+          console.log('🔑 Rol del usuario:', role);
+          setUserRole(role);
+        } else {
+          setUserRole('user');
         }
       } catch (err) {
         console.error('Error loading user role:', err);
+        setUserRole('user');
       }
     };
     loadUserRole();
