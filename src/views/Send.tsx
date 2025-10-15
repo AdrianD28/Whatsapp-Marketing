@@ -23,7 +23,11 @@ interface SendFormData {
   campaignName?: string;
 }
 
-export function Send() {
+interface SendProps {
+  onMessageSent?: () => void;
+}
+
+export function Send({ onMessageSent }: SendProps) {
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
@@ -203,6 +207,12 @@ export function Send() {
           description: `${result.total} mensajes procesándose en background`,
           type: 'success',
         });
+
+        // 💳 Refrescar créditos después de crear la campaña
+        if (onMessageSent) {
+          // Esperar un poco para que se procesen los mensajes y se descuenten créditos
+          setTimeout(() => onMessageSent(), 2000);
+        }
 
         // Abrir monitor automáticamente
         setShowMonitor(true);
@@ -471,6 +481,12 @@ export function Send() {
   setChecklistConfirmed(false);
   setShowChecklist(false);
   setPendingData(null);
+  
+  // 💳 Refrescar créditos después del envío
+  if (onMessageSent) {
+    onMessageSent();
+  }
+  
   // Limpiar cache de media al finalizar el envío
   try { localStorage.removeItem(CACHE_KEY); } catch {}
   // Registrar sesión de envío para reportes
@@ -523,7 +539,10 @@ export function Send() {
 
       {/* Campaign Monitor */}
       {showMonitor && (
-        <CampaignMonitor onClose={() => setShowMonitor(false)} />
+        <CampaignMonitor 
+          onClose={() => setShowMonitor(false)} 
+          onCampaignUpdate={onMessageSent}
+        />
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

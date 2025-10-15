@@ -8,9 +8,10 @@ import toast from 'react-hot-toast';
 
 interface CampaignMonitorProps {
   onClose?: () => void;
+  onCampaignUpdate?: () => void;
 }
 
-export function CampaignMonitor({ onClose }: CampaignMonitorProps) {
+export function CampaignMonitor({ onClose, onCampaignUpdate }: CampaignMonitorProps) {
   const { campaigns, loading, listCampaigns, getCampaignStatus, pauseCampaign, resumeCampaign, cancelCampaign } = useCampaigns();
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
@@ -22,6 +23,10 @@ export function CampaignMonitor({ onClose }: CampaignMonitorProps) {
       const hasActive = campaigns.some(c => c.status === 'processing' || c.status === 'pending');
       if (hasActive) {
         loadCampaigns();
+        // Refrescar créditos cuando hay campañas activas
+        if (onCampaignUpdate) {
+          onCampaignUpdate();
+        }
       }
     }, 5000);
 

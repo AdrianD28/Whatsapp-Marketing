@@ -76,6 +76,23 @@ function AppContent() {
     })();
   }, [showAuthModal, hasToken]);
 
+  // Función para refrescar créditos
+  const refreshCredits = async () => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    if (!token) return;
+    
+    try {
+      const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) {
+        const j = await r.json();
+        setUserCredits(j?.user?.credits ?? 0);
+        console.log('💳 Créditos actualizados:', j?.user?.credits);
+      }
+    } catch (err) {
+      console.error('Error refreshing credits:', err);
+    }
+  };
+
   const loadInitialData = async () => {
     if (!apiCredentials) return;
     
@@ -154,7 +171,7 @@ function AppContent() {
     switch (currentView) {
       case 'templates': return <Templates />;
       case 'contacts': return <Contacts />;
-      case 'send': return <Send />;
+      case 'send': return <Send onMessageSent={refreshCredits} />;
       case 'statistics': return <Statistics />;
       case 'admin': return <Admin />;
       default: return <Dashboard />;
