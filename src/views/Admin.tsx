@@ -516,25 +516,24 @@ export function Admin() {
                 </p>
               </div>
             )}
-          <div className="flex justify-end gap-2 pt-4">
-          
-          <div className="flex justify-end gap-2 pt-4">
-            <Button
-              variant="secondary"
-              onClick={() => setShowAddCredits(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleAddCredits}
-              disabled={creditsToAdd <= 0}
-            >
-              Agregar Créditos
-            </Button>
+            
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="secondary"
+                onClick={() => setShowAddCredits(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleAddCredits}
+                disabled={creditsToAdd <= 0}
+              >
+                Agregar Créditos
+              </Button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
       )}
     </motion.div>
   );
