@@ -510,7 +510,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     const total = await db.collection('users').countDocuments();
     
     const formatted = users.map(u => ({
-      id: String(u._id),
+      _id: String(u._id),
       email: u.email,
       name: u.name || '',
       role: u.role || 'user',

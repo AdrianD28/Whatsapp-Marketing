@@ -71,6 +71,12 @@ export function Admin() {
       console.log('👥 Usuarios en data.users:', data.users);
       console.log('📊 Cantidad de usuarios:', data.users?.length || 0);
       
+      // Verificar estructura de cada usuario
+      if (data.users && data.users.length > 0) {
+        console.log('🔍 Primer usuario completo:', JSON.stringify(data.users[0]));
+        console.log('🔑 Propiedades del primer usuario:', Object.keys(data.users[0]));
+      }
+      
       setUsers(data.users || []);
     } catch (err: any) {
       console.error('❌ Error loading users:', err);
@@ -368,8 +374,17 @@ export function Admin() {
                     <div className="flex items-center justify-end gap-1 sm:gap-2">
                       <button
                         onClick={() => {
-                          console.log('🖱️ Click en agregar créditos, usuario:', user);
+                          console.log('🖱️ Click en agregar créditos, usuario completo:', JSON.stringify(user));
                           console.log('🆔 User ID:', user._id);
+                          console.log('📧 User Email:', user.email);
+                          console.log('🔑 Todas las propiedades del user:', Object.keys(user));
+                          
+                          if (!user._id) {
+                            console.error('❌ ERROR: user._id está undefined!');
+                            toast.error('Error: Usuario sin ID válido');
+                            return;
+                          }
+                          
                           setSelectedUser(user);
                           // Pequeño delay para asegurar que el estado se actualice
                           setTimeout(() => setShowAddCredits(true), 10);
