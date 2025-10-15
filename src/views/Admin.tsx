@@ -368,8 +368,11 @@ export function Admin() {
                     <div className="flex items-center justify-end gap-1 sm:gap-2">
                       <button
                         onClick={() => {
+                          console.log('🖱️ Click en agregar créditos, usuario:', user);
+                          console.log('🆔 User ID:', user._id);
                           setSelectedUser(user);
-                          setShowAddCredits(true);
+                          // Pequeño delay para asegurar que el estado se actualice
+                          setTimeout(() => setShowAddCredits(true), 10);
                         }}
                         className="p-1 sm:p-1.5 rounded hover:bg-green-900/30 text-green-400 transition-colors"
                         title="Agregar créditos"
@@ -476,51 +479,43 @@ export function Admin() {
       </Modal>
 
       {/* Modal: Agregar Créditos */}
-      <Modal
-        isOpen={showAddCredits}
-        onClose={() => {
-          setShowAddCredits(false);
-          setCreditsToAdd(0);
-          setSelectedUser(null);
-        }}
-        title="Agregar Créditos"
-      >
-        <div className="space-y-4">
-          {selectedUser ? (
-            <>
-              <div className="bg-gray-800 rounded-lg p-4">
-                <p className="text-sm text-gray-400">Usuario seleccionado:</p>
-                <p className="text-white font-semibold">{selectedUser.email}</p>
-                <p className="text-xs text-gray-500 mt-1">ID: {selectedUser._id}</p>
-                <p className="text-sm text-gray-400 mt-2">Créditos actuales:</p>
-                <p className="text-2xl font-bold text-green-400">{(selectedUser.credits || 0).toLocaleString()}</p>
-              </div>
-              
-              <Input
-                label="Cantidad de Créditos a Agregar"
-                type="number"
-                value={creditsToAdd}
-                onChange={(e) => setCreditsToAdd(parseInt(e.target.value) || 0)}
-                placeholder="1000"
-                min={1}
-              />
-              
-              {creditsToAdd > 0 && (
-                <div className="bg-green-900/20 border border-green-800 rounded-lg p-3">
-                  <p className="text-sm text-green-300">
-                    Nuevo balance: <span className="font-bold">
-                      {((selectedUser.credits || 0) + creditsToAdd).toLocaleString()}
-                    </span> créditos
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
-              <p className="text-red-300 text-sm">Error: No se ha seleccionado ningún usuario</p>
+      {selectedUser && selectedUser._id && (
+        <Modal
+          isOpen={showAddCredits}
+          onClose={() => {
+            setShowAddCredits(false);
+            setCreditsToAdd(0);
+            setSelectedUser(null);
+          }}
+          title="Agregar Créditos"
+        >
+          <div className="space-y-4">
+            <div className="bg-gray-800 rounded-lg p-4">
+              <p className="text-sm text-gray-400">Usuario seleccionado:</p>
+              <p className="text-white font-semibold">{selectedUser.email}</p>
+              <p className="text-xs text-gray-500 mt-1 font-mono">ID: {selectedUser._id}</p>
+              <p className="text-sm text-gray-400 mt-2">Créditos actuales:</p>
+              <p className="text-2xl font-bold text-green-400">{(selectedUser.credits || 0).toLocaleString()}</p>
             </div>
-          )}
-          
+            
+            <Input
+              label="Cantidad de Créditos a Agregar"
+              type="number"
+              value={creditsToAdd}
+              onChange={(e) => setCreditsToAdd(parseInt(e.target.value) || 0)}
+              placeholder="1000"
+              min={1}
+            />
+            
+            {creditsToAdd > 0 && (
+              <div className="bg-green-900/20 border border-green-800 rounded-lg p-3">
+                <p className="text-sm text-green-300">
+                  Nuevo balance: <span className="font-bold">
+                    {((selectedUser.credits || 0) + creditsToAdd).toLocaleString()}
+                  </span> créditos
+                </p>
+              </div>
+            )}
           <div className="flex justify-end gap-2 pt-4">
             <Button
               variant="secondary"
@@ -536,8 +531,8 @@ export function Admin() {
               Agregar Créditos
             </Button>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
     </motion.div>
   );
 }
