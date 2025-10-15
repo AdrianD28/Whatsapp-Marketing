@@ -552,11 +552,12 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
       return res.status(403).json({ error: 'only_super_admin_can_create_admins' });
     }
     
-    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    // Usar la función hashPassword para consistencia
+    const passwordHash = hashPassword(password);
     
     const newUser = {
       email,
-      password: hash,
+      passwordHash: passwordHash, // Usar passwordHash en lugar de password
       name: name || '',
       role: requestedRole,
       credits: parseInt(initialCredits) || 0,
@@ -2271,14 +2272,15 @@ app.listen(port, async () => {
     const existing = await db.collection('users').findOne({ email: superAdminEmail });
     
     if (!existing) {
-      const hash = crypto.createHash('sha256').update(superAdminPassword).digest('hex');
+      // Usar la misma función de hash que usa el sistema de login
+      const passwordHash = hashPassword(superAdminPassword);
       
       const superAdminCredits = parseInt(process.env.SUPER_ADMIN_CREDITS) || 999999;
       
       await db.collection('users').insertOne({
         email: superAdminEmail,
         name: process.env.SUPER_ADMIN_NAME || 'Super Admin',
-        password: hash,
+        passwordHash: passwordHash, // 🚨 Usar passwordHash, no password
         role: 'super_admin', // 🚨 Rol máximo
         credits: superAdminCredits, // 🚨 Créditos configurables
         createdAt: new Date().toISOString(),
