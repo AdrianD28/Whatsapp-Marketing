@@ -2260,25 +2260,32 @@ app.listen(port, async () => {
   // 🚨 CRÍTICO: Inicializar super admin al arrancar el servidor
   try {
     const db = await getDb();
-    const superAdminEmail = 'development@levitze.com';
-    const superAdminPassword = '30029040';
+    const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@example.com';
+    const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD;
+    
+    if (!superAdminPassword) {
+      console.warn('⚠️  SUPER_ADMIN_PASSWORD no está configurado. Super admin NO será creado.');
+      return;
+    }
     
     const existing = await db.collection('users').findOne({ email: superAdminEmail });
     
     if (!existing) {
       const hash = crypto.createHash('sha256').update(superAdminPassword).digest('hex');
       
+      const superAdminCredits = parseInt(process.env.SUPER_ADMIN_CREDITS) || 999999;
+      
       await db.collection('users').insertOne({
         email: superAdminEmail,
-        name: 'Super Admin',
+        name: process.env.SUPER_ADMIN_NAME || 'Super Admin',
         password: hash,
         role: 'super_admin', // 🚨 Rol máximo
-        credits: 999999, // 🚨 Créditos ilimitados
+        credits: superAdminCredits, // 🚨 Créditos configurables
         createdAt: new Date().toISOString(),
         lastMessageAt: null,
       });
       
-      console.log(`✅ Super admin created: ${superAdminEmail}`);
+      console.log(`✅ Super admin created: ${superAdminEmail} with ${superAdminCredits} credits`);
     } else {
       console.log(`✅ Super admin already exists: ${superAdminEmail} (role: ${existing.role})`);
     }
