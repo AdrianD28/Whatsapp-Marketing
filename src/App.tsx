@@ -10,6 +10,7 @@ import { Templates } from './views/Templates';
 import { Contacts } from './views/Contacts';
 import { Send } from './views/Send';
 import { Statistics } from './views/Statistics';
+import { Admin } from './views/Admin';
 import { useApi } from './hooks/useApi';
 
 const viewTitles = {
@@ -18,6 +19,7 @@ const viewTitles = {
   contacts: { title: 'Contactos', subtitle: 'Administra tu lista de contactos' },
   send: { title: 'Envío Masivo', subtitle: 'Configura y ejecuta campañas de mensajes' },
   statistics: { title: 'Estadísticas', subtitle: 'Resultados de campañas y estados' },
+  admin: { title: 'Administración', subtitle: 'Gestiona usuarios y créditos del sistema' },
 };
 
 function AppContent() {
@@ -26,6 +28,7 @@ function AppContent() {
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userCredits, setUserCredits] = useState<number | undefined>(undefined);
   const [hasToken, setHasToken] = useState<boolean>(() => {
     try { return !!localStorage.getItem('auth_token'); } catch { return false; }
   });
@@ -42,15 +45,16 @@ function AppContent() {
   // Cargar info del usuario si hay token en localStorage
   useEffect(() => {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('auth_token') : null;
-    if (!token) { setUserEmail(null); setHasToken(false); return; }
+    if (!token) { setUserEmail(null); setUserCredits(undefined); setHasToken(false); return; }
     setHasToken(true);
     (async () => {
       try {
         const r = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        if (!r.ok) { setUserEmail(null); return; }
+        if (!r.ok) { setUserEmail(null); setUserCredits(undefined); return; }
         const j = await r.json();
         setUserEmail(j?.user?.email ?? null);
-      } catch { setUserEmail(null); }
+        setUserCredits(j?.user?.credits ?? 0);
+      } catch { setUserEmail(null); setUserCredits(undefined); }
     })();
   }, [showAuthModal, hasToken]);
 
@@ -130,6 +134,7 @@ function AppContent() {
       case 'contacts': return <Contacts />;
       case 'send': return <Send />;
       case 'statistics': return <Statistics />;
+      case 'admin': return <Admin />;
       default: return <Dashboard />;
     }
   };
@@ -166,6 +171,7 @@ function AppContent() {
           onLogin={handleLogin}
           onLogout={handleLogout}
           userEmail={userEmail}
+          credits={userCredits}
           onToggleSidebar={() => setSidebarOpen(v => !v)}
         />
         

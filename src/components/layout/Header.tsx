@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, Settings, LogIn, LogOut, Menu, User2, ChevronDown } from 'lucide-react';
+import { RefreshCw, Settings, LogIn, LogOut, Menu, User2, ChevronDown, Coins } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface HeaderProps {
@@ -15,6 +15,7 @@ interface HeaderProps {
   imageUrl?: string;
   onToggleSidebar?: () => void;
   userEmail?: string | null;
+  credits?: number;
 }
 
 export function Header({
@@ -29,6 +30,7 @@ export function Header({
   imageUrl,
   onToggleSidebar,
   userEmail,
+  credits,
 }: HeaderProps) {
   const [openMenu, setOpenMenu] = useState(false);
   return (
@@ -68,6 +70,21 @@ export function Header({
             </Button>
           ) : (
             <>
+              {/* Display de créditos */}
+              {credits !== undefined && (
+                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold ${
+                  credits === 0 
+                    ? 'bg-red-900/30 text-red-300 border border-red-800' 
+                    : credits < 100 
+                    ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800' 
+                    : 'bg-green-900/30 text-green-300 border border-green-800'
+                }`}>
+                  <Coins className="w-4 h-4" />
+                  <span className="hidden sm:inline">{credits.toLocaleString()}</span>
+                  <span className="sm:hidden">{credits > 999 ? `${(credits/1000).toFixed(1)}k` : credits}</span>
+                </div>
+              )}
+              
               <button
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-gray-500"
                 onClick={() => setOpenMenu(v => !v)}

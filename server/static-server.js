@@ -359,7 +359,13 @@ async function getUserFromAuth(req) {
   if (t.expiresAt && new Date(t.expiresAt) <= new Date()) return null;
   const user = await db.collection('users').findOne({ _id: t.userId });
   if (!user) return null;
-  return { id: String(user._id), email: user.email, name: user.name || null };
+  return { 
+    id: String(user._id), 
+    email: user.email, 
+    name: user.name || null,
+    role: user.role || 'user',      // 🚨 NUEVO
+    credits: user.credits || 0      // 🚨 NUEVO
+  };
 }
 
 // Middleware de autorización: token de usuario o compatibilidad con X-Account-Key
@@ -388,26 +394,41 @@ async function requireUser(req, res, next) {
   return res.status(401).json({ error: 'auth_required', hint: 'Authorization: Bearer <token>' });
 }
 
-// --- Auth endpoints ---
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const db = await getDb();
-    const { email, password, name } = req.body || {};
-    if (!email || !password) return res.status(400).json({ error: 'email_and_password_required' });
-    const emailNorm = String(email).trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) return res.status(400).json({ error: 'invalid_email' });
-    if (String(password).length < 6) return res.status(400).json({ error: 'weak_password', hint: 'min 6 chars' });
-    const exists = await db.collection('users').findOne({ email: emailNorm });
-    if (exists) return res.status(409).json({ error: 'email_taken' });
-    const passwordHash = hashPassword(password);
-    const now = new Date().toISOString();
-    const r = await db.collection('users').insertOne({ email: emailNorm, name: name?.trim() || null, passwordHash, createdAt: now, updatedAt: now });
-    const token = await createAuthToken(db, r.insertedId);
-    return res.json({ token, user: { id: String(r.insertedId), email: emailNorm, name: name?.trim() || null } });
-  } catch (err) {
-    console.error('/api/auth/register error', err);
-    return res.status(500).json({ error: 'server_error' });
+// 🚨 NUEVO: Middleware que exige admin o super_admin
+async function requireAdmin(req, res, next) {
+  const user = await getUserFromAuth(req);
+  if (!user) {
+    return res.status(401).json({ error: 'auth_required' });
   }
+  if (user.role !== 'admin' && user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'admin_required', message: 'Esta acción requiere permisos de administrador' });
+  }
+  req.userId = user.id;
+  req.user = user;
+  return next();
+}
+
+// 🚨 NUEVO: Middleware que exige super_admin
+async function requireSuperAdmin(req, res, next) {
+  const user = await getUserFromAuth(req);
+  if (!user) {
+    return res.status(401).json({ error: 'auth_required' });
+  }
+  if (user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'super_admin_required', message: 'Esta acción requiere permisos de super administrador' });
+  }
+  req.userId = user.id;
+  req.user = user;
+  return next();
+}
+
+// --- Auth endpoints ---
+// 🚨 REGISTRO DESHABILITADO - Solo admins pueden crear cuentas
+app.post('/api/auth/register', async (req, res) => {
+  return res.status(403).json({ 
+    error: 'registration_disabled', 
+    message: 'El registro público está deshabilitado. Contacta al administrador para crear una cuenta.' 
+  });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -420,7 +441,16 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'invalid_credentials' });
     if (!verifyPassword(password, user.passwordHash)) return res.status(401).json({ error: 'invalid_credentials' });
     const token = await createAuthToken(db, user._id);
-    return res.json({ token, user: { id: String(user._id), email: user.email, name: user.name || null } });
+    return res.json({ 
+      token, 
+      user: { 
+        id: String(user._id), 
+        email: user.email, 
+        name: user.name || null,
+        role: user.role || 'user', // 🚨 NUEVO: role
+        credits: user.credits || 0   // 🚨 NUEVO: créditos
+      } 
+    });
   } catch (err) {
     console.error('/api/auth/login error', err);
     return res.status(500).json({ error: 'server_error' });
@@ -441,8 +471,236 @@ app.post('/api/auth/logout', requireUser, async (req, res) => {
 });
 
 app.get('/api/auth/me', requireUser, async (req, res) => {
-  return res.json({ user: req.user });
+  // Obtener datos actualizados del usuario (incluye créditos frescos)
+  try {
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(req.userId) });
+    if (!user) return res.status(404).json({ error: 'user_not_found' });
+    
+    return res.json({ 
+      user: {
+        id: String(user._id),
+        email: user.email,
+        name: user.name || null,
+        role: user.role || 'user',
+        credits: user.credits || 0
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
+
+// ==================== ADMIN ENDPOINTS ====================
+// 🚨 ADMIN: Listar todos los usuarios
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+    
+    const users = await db.collection('users')
+      .find({}, { projection: { password: 0 } })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+    
+    const total = await db.collection('users').countDocuments();
+    
+    const formatted = users.map(u => ({
+      id: String(u._id),
+      email: u.email,
+      name: u.name || '',
+      role: u.role || 'user',
+      credits: u.credits || 0,
+      createdAt: u.createdAt,
+      lastMessageAt: u.lastMessageAt || null
+    }));
+    
+    return res.json({ 
+      users: formatted, 
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    });
+  } catch (err) {
+    console.error('GET /api/admin/users error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// 🚨 ADMIN: Crear nuevo usuario
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { email, password, name, initialCredits, role } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email_and_password_required' });
+    }
+    
+    const db = await getDb();
+    
+    // Verificar que el email no existe
+    const existing = await db.collection('users').findOne({ email });
+    if (existing) {
+      return res.status(409).json({ error: 'email_already_exists' });
+    }
+    
+    // Solo super_admin puede crear otros admins
+    const requestedRole = role || 'user';
+    if ((requestedRole === 'admin' || requestedRole === 'super_admin') && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'only_super_admin_can_create_admins' });
+    }
+    
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    
+    const newUser = {
+      email,
+      password: hash,
+      name: name || '',
+      role: requestedRole,
+      credits: parseInt(initialCredits) || 0,
+      createdAt: new Date().toISOString(),
+      lastMessageAt: null
+    };
+    
+    const result = await db.collection('users').insertOne(newUser);
+    
+    console.log(`✅ User created by admin: ${email} with ${newUser.credits} credits`);
+    
+    return res.json({ 
+      success: true,
+      user: {
+        id: String(result.insertedId),
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        credits: newUser.credits
+      }
+    });
+  } catch (err) {
+    console.error('POST /api/admin/users error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// 🚨 ADMIN: Actualizar datos de usuario
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, role } = req.body;
+    
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'user_not_found' });
+    }
+    
+    // Solo super_admin puede cambiar roles
+    if (role && req.user.role !== 'super_admin') {
+      return res.status(403).json({ error: 'only_super_admin_can_change_roles' });
+    }
+    
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (role !== undefined) updates.role = role;
+    
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'no_fields_to_update' });
+    }
+    
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updates }
+    );
+    
+    console.log(`✅ User updated by admin: ${user.email}`);
+    
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('PATCH /api/admin/users/:id error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// 🚨 ADMIN: Eliminar usuario
+app.delete('/api/admin/users/:id', requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'user_not_found' });
+    }
+    
+    // No permitir eliminar al mismo super admin
+    if (String(user._id) === String(req.user._id)) {
+      return res.status(403).json({ error: 'cannot_delete_yourself' });
+    }
+    
+    await db.collection('users').deleteOne({ _id: new ObjectId(id) });
+    
+    console.log(`✅ User deleted by super admin: ${user.email}`);
+    
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/admin/users/:id error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// 🚨 ADMIN: Gestionar créditos (agregar o quitar)
+app.post('/api/admin/credits', requireAdmin, async (req, res) => {
+  try {
+    const { userId, amount, reason } = req.body;
+    
+    if (!userId || typeof amount !== 'number') {
+      return res.status(400).json({ error: 'userId_and_amount_required' });
+    }
+    
+    const db = await getDb();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'user_not_found' });
+    }
+    
+    const currentCredits = user.credits || 0;
+    const newCredits = Math.max(0, currentCredits + amount);
+    
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { credits: newCredits } }
+    );
+    
+    // Log de transacción (opcional, puedes crear una colección credit_logs)
+    await db.collection('credit_logs').insertOne({
+      userId: new ObjectId(userId),
+      adminId: new ObjectId(req.user._id),
+      amount,
+      previousCredits: currentCredits,
+      newCredits,
+      reason: reason || 'manual_adjustment',
+      createdAt: new Date().toISOString()
+    });
+    
+    console.log(`💳 Credits ${amount > 0 ? 'added' : 'removed'}: ${user.email} now has ${newCredits} credits (${amount > 0 ? '+' : ''}${amount})`);
+    
+    return res.json({ 
+      success: true,
+      credits: newCredits,
+      change: amount
+    });
+  } catch (err) {
+    console.error('POST /api/admin/credits error:', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// ==================== END ADMIN ENDPOINTS ====================
 
 // --- User Meta Credentials (plaintext as requested) ---
 app.get('/api/user/meta-credentials', requireUser, async (req, res) => {
@@ -701,10 +959,20 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     if (!to || typeof to !== 'string') return res.status(400).json({ error: 'invalid_to' });
     if (!template || typeof template !== 'object') return res.status(400).json({ error: 'invalid_template' });
 
-    const user = await db.collection('users').findOne({ _id: userIdObj }, { projection: { metaCreds: 1 } });
+    const user = await db.collection('users').findOne({ _id: userIdObj }, { projection: { metaCreds: 1, credits: 1 } });
     const creds = user?.metaCreds || {};
     if (!creds.accessToken || !creds.phoneNumberId) {
       return res.status(400).json({ error: 'missing_meta_credentials', hint: 'Configura accessToken y phoneNumberId' });
+    }
+
+    // 💰 VALIDAR CRÉDITOS
+    const userCredits = user?.credits || 0;
+    if (userCredits < 1) {
+      return res.status(402).json({ 
+        error: 'insufficient_credits',
+        message: 'No tienes créditos suficientes para enviar mensajes',
+        available: userCredits
+      });
     }
 
     // Construir payload mínimo válido para Graph
@@ -761,6 +1029,21 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
       return res.status(gRes.status).json({ error: 'graph_error', status: gRes.status, response: graphJson, _logId: logId });
     }
 
+    // 💰 DESCONTAR CRÉDITO DESPUÉS DE ENVÍO EXITOSO
+    try {
+      await db.collection('users').updateOne(
+        { _id: userIdObj },
+        { $inc: { credits: -1 } }
+      );
+      // Registrar en log que se descontó crédito
+      await db.collection('send_logs').updateOne(
+        { _id: logId },
+        { $set: { creditDeducted: true } }
+      );
+    } catch (creditErr) {
+      console.warn('credit deduction failed', creditErr);
+    }
+
     // Guardar messageId para correlación si existe
     try {
       const messageId = graphJson?.messages?.[0]?.id;
@@ -790,6 +1073,23 @@ const activeCampaigns = new Map();
 
 // Función helper para enviar un mensaje individual
 async function sendSingleMessage(db, userId, to, template, batchId, creds) {
+  // 🚨 CRÍTICO: Validar créditos ANTES de enviar
+  const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
+  if (!user) {
+    return { success: false, error: 'user_not_found', skipped: true };
+  }
+  
+  const credits = user.credits || 0;
+  if (credits <= 0) {
+    console.warn(`❌ No credits: user ${userId} has ${credits} credits`);
+    return { 
+      success: false, 
+      error: 'insufficient_credits', 
+      skipped: true,
+      message: 'Sin créditos suficientes'
+    };
+  }
+
   // 🚨 CRÍTICO: Validar opt-out antes de enviar
   const optOut = await db.collection('opt_outs').findOne({ 
     numero: to,
@@ -865,6 +1165,18 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
   let graphJson;
   try { graphJson = JSON.parse(text); } catch { graphJson = { raw: text }; }
 
+  // 🚨 CRÍTICO: Descontar 1 crédito SOLO si envío fue exitoso
+  if (gRes.ok) {
+    await db.collection('users').updateOne(
+      { _id: new ObjectId(userId) },
+      { 
+        $inc: { credits: -1 },
+        $set: { lastMessageAt: new Date().toISOString() }
+      }
+    );
+    console.log(`💳 Credit deducted: user ${userId} sent message to ${to} (${credits - 1} credits remaining)`);
+  }
+
   // Log del envío
   const logDoc = {
     userId: new ObjectId(userId),
@@ -877,6 +1189,7 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
     graphResponse: graphJson,
     success: gRes.ok,
     messageId: graphJson?.messages?.[0]?.id || null,
+    creditDeducted: gRes.ok ? 1 : 0, // 🚨 NUEVO: track credit usage
   };
   
   await db.collection('send_logs').insertOne(logDoc);
@@ -954,6 +1267,29 @@ async function processCampaignBackground(campaignId) {
         { $set: { status: 'completed', error: 'all_contacts_opted_out', completedAt: new Date().toISOString() } }
       );
       console.warn(`Campaign ${campaignId} completed: all contacts have opted out`);
+      return;
+    }
+
+    // 💰 VALIDAR CRÉDITOS ANTES DE INICIAR CAMPAÑA
+    const userCredits = user?.credits || 0;
+    const requiredCredits = contacts.length;
+    if (userCredits < requiredCredits) {
+      await db.collection('campaigns').updateOne(
+        { _id: campaign._id },
+        { 
+          $set: { 
+            status: 'failed', 
+            error: 'insufficient_credits',
+            errorDetails: {
+              required: requiredCredits,
+              available: userCredits,
+              missing: requiredCredits - userCredits
+            },
+            completedAt: new Date().toISOString() 
+          } 
+        }
+      );
+      console.warn(`Campaign ${campaignId} failed: insufficient credits (${userCredits}/${requiredCredits})`);
       return;
     }
 
@@ -1129,6 +1465,20 @@ app.post('/api/campaigns/create', requireUser, async (req, res) => {
     const creds = user?.metaCreds || {};
     if (!creds.accessToken || !creds.phoneNumberId) {
       return res.status(400).json({ error: 'missing_meta_credentials' });
+    }
+
+    // 💰 VALIDAR CRÉDITOS ANTES DE CREAR CAMPAÑA
+    const userCredits = user?.credits || 0;
+    const requiredCredits = contacts.length;
+    
+    if (userCredits < requiredCredits) {
+      return res.status(402).json({ 
+        error: 'insufficient_credits',
+        message: `Necesitas ${requiredCredits} créditos pero solo tienes ${userCredits}`,
+        required: requiredCredits,
+        available: userCredits,
+        missing: requiredCredits - userCredits
+      });
     }
 
     // Crear documento de campaña
@@ -1904,4 +2254,36 @@ app.post('/create-template', upload.single('file'), async (req, res) => {
   }
 });
 
-app.listen(port, () => console.log(`Static server listening on http://localhost:${port}`));
+app.listen(port, async () => {
+  console.log(`Static server listening on http://localhost:${port}`);
+  
+  // 🚨 CRÍTICO: Inicializar super admin al arrancar el servidor
+  try {
+    const db = await getDb();
+    const superAdminEmail = 'development@levitze.com';
+    const superAdminPassword = '30029040';
+    
+    const existing = await db.collection('users').findOne({ email: superAdminEmail });
+    
+    if (!existing) {
+      const hash = crypto.createHash('sha256').update(superAdminPassword).digest('hex');
+      
+      await db.collection('users').insertOne({
+        email: superAdminEmail,
+        name: 'Super Admin',
+        password: hash,
+        role: 'super_admin', // 🚨 Rol máximo
+        credits: 999999, // 🚨 Créditos ilimitados
+        createdAt: new Date().toISOString(),
+        lastMessageAt: null,
+      });
+      
+      console.log(`✅ Super admin created: ${superAdminEmail}`);
+    } else {
+      console.log(`✅ Super admin already exists: ${superAdminEmail} (role: ${existing.role})`);
+    }
+  } catch (err) {
+    console.error('❌ Error initializing super admin:', err);
+  }
+});
+

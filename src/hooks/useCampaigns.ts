@@ -50,6 +50,17 @@ export function useCampaigns() {
 
     if (!response.ok) {
       const error = await response.json();
+      
+      // 💰 ERROR 402: Créditos insuficientes
+      if (response.status === 402) {
+        const err = new Error(error.message || 'Créditos insuficientes') as any;
+        err.code = 'insufficient_credits';
+        err.required = error.required;
+        err.available = error.available;
+        err.missing = error.missing;
+        throw err;
+      }
+      
       throw new Error(error.error || 'Error creating campaign');
     }
 

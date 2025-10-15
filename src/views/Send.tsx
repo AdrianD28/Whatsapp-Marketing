@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import { HelpTooltip } from '../components/ui/HelpTooltip';
 import { Modal } from '../components/ui/Modal';
 import { CampaignMonitor } from '../components/campaigns/CampaignMonitor';
+import InsufficientCreditsModal from '../components/ui/InsufficientCreditsModal';
 
 interface SendFormData {
   templateName: string;
@@ -33,6 +34,8 @@ export function Send() {
   const [checkCoherence, setCheckCoherence] = useState(false);
   const [checkFrequency, setCheckFrequency] = useState(false);
   const [pendingData, setPendingData] = useState<SendFormData | null>(null);
+  const [showInsufficientCredits, setShowInsufficientCredits] = useState(false);
+  const [creditError, setCreditError] = useState<{ required?: number; available?: number; missing?: number }>({});
   const { templates, contacts, sendProgress, setSendProgress, apiCredentials, addActivity, addSendSession } = useAppContext();
   const { sendMessage } = useApi(apiCredentials);
   const { createCampaign } = useCampaigns();
@@ -207,7 +210,18 @@ export function Send() {
 
       } catch (err: any) {
         console.error('Error creating background campaign:', err);
-        toast.error(err.message || 'Error al crear campaña en background');
+        
+        // 💰 Detectar error de créditos insuficientes
+        if (err.code === 'insufficient_credits') {
+          setCreditError({
+            required: err.required,
+            available: err.available,
+            missing: err.missing
+          });
+          setShowInsufficientCredits(true);
+        } else {
+          toast.error(err.message || 'Error al crear campaña en background');
+        }
         return;
       }
     }
@@ -963,6 +977,18 @@ export function Send() {
           </div>
         </Modal>
       )}
+
+      {/* Modal de créditos insuficientes */}
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCredits}
+        onClose={() => {
+          setShowInsufficientCredits(false);
+          setCreditError({});
+        }}
+        required={creditError.required}
+        available={creditError.available}
+        missing={creditError.missing}
+      />
     </motion.div>
   );
 }

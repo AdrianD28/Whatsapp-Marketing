@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   BarChart3, 
@@ -7,7 +7,8 @@ import {
   Send, 
   MessageSquare,
   Menu,
-  X
+  X,
+  Shield
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -24,8 +25,38 @@ const menuItems = [
   { id: 'statistics', label: 'Estadísticas', icon: BarChart3 },
 ];
 
+const adminMenuItem = { id: 'admin', label: 'Administración', icon: Shield };
+
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [userRole, setUserRole] = useState<string>('user');
+
+  // Obtener rol del usuario
+  useEffect(() => {
+    const loadUserRole = async () => {
+      try {
+        const token = localStorage.getItem('auth_token');
+        if (!token) return;
+        
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setUserRole(data.user?.role || 'user');
+        }
+      } catch (err) {
+        console.error('Error loading user role:', err);
+      }
+    };
+    loadUserRole();
+  }, []);
+
+  // Agregar admin menu si es admin o super_admin
+  const allMenuItems = userRole === 'admin' || userRole === 'super_admin' 
+    ? [...menuItems, adminMenuItem]
+    : menuItems;
 
   return (
     <motion.aside
@@ -64,7 +95,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 p-4 space-y-2">
-        {menuItems.map((item) => {
+        {allMenuItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentView === item.id;
           
