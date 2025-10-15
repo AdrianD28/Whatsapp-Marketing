@@ -517,6 +517,8 @@ export function Admin() {
               </div>
             )}
           <div className="flex justify-end gap-2 pt-4">
+          
+          <div className="flex justify-end gap-2 pt-4">
             <Button
               variant="secondary"
               onClick={() => setShowAddCredits(false)}
@@ -531,7 +533,8 @@ export function Admin() {
               Agregar Créditos
             </Button>
           </div>
-        </Modal>
+        </div>
+      </Modal>
       )}
     </motion.div>
   );
