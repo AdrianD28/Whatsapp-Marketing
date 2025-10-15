@@ -658,50 +658,77 @@ app.post('/api/admin/credits', requireAdmin, async (req, res) => {
   try {
     const { userId, amount, reason } = req.body;
     
-    console.log('📋 POST /api/admin/credits request:', { userId, amount, reason });
+    console.log('📋 POST /api/admin/credits request body:', req.body);
+    console.log('📋 Types:', { 
+      userId: typeof userId, 
+      amount: typeof amount,
+      userIdValue: userId,
+      amountValue: amount
+    });
     console.log('👤 Admin user:', req.user);
     console.log('🆔 Admin userId:', req.userId);
     
-    if (!userId || typeof amount !== 'number') {
-      console.error('❌ Missing userId or amount:', { userId, amount, typeOfAmount: typeof amount });
-      return res.status(400).json({ error: 'userId_and_amount_required' });
+    // Validar que userId exista y no sea vacío
+    if (!userId || userId === '' || typeof userId !== 'string') {
+      console.error('❌ userId invalid:', { userId, type: typeof userId });
+      return res.status(400).json({ 
+        error: 'userId_and_amount_required',
+        details: 'userId is missing or invalid',
+        received: { userId, amount }
+      });
+    }
+    
+    // Validar que amount sea un número válido
+    const parsedAmount = typeof amount === 'string' ? parseInt(amount, 10) : amount;
+    if (typeof parsedAmount !== 'number' || isNaN(parsedAmount)) {
+      console.error('❌ amount invalid:', { amount, parsedAmount, type: typeof amount });
+      return res.status(400).json({ 
+        error: 'userId_and_amount_required',
+        details: 'amount must be a valid number',
+        received: { userId, amount }
+      });
     }
     
     const db = await getDb();
     const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
     
     if (!user) {
+      console.error('❌ User not found:', userId);
       return res.status(404).json({ error: 'user_not_found' });
     }
     
     const currentCredits = user.credits || 0;
-    const newCredits = Math.max(0, currentCredits + amount);
+    const newCredits = Math.max(0, currentCredits + parsedAmount);
     
     await db.collection('users').updateOne(
       { _id: new ObjectId(userId) },
-      { $set: { credits: newCredits } }
+      { $set: { credits: newCredits, updatedAt: new Date().toISOString() } }
     );
     
-    // Log de transacción (opcional, puedes crear una colección credit_logs)
-    await db.collection('credit_logs').insertOne({
-      userId: new ObjectId(userId),
-      adminId: new ObjectId(req.userId),
-      amount,
-      previousCredits: currentCredits,
-      newCredits,
-      reason: reason || 'manual_adjustment',
-      createdAt: new Date().toISOString()
-    });
+    // Log de transacción
+    try {
+      await db.collection('credit_logs').insertOne({
+        userId: new ObjectId(userId),
+        adminId: new ObjectId(req.userId),
+        amount: parsedAmount,
+        previousCredits: currentCredits,
+        newCredits,
+        reason: reason || 'manual_adjustment',
+        createdAt: new Date().toISOString()
+      });
+    } catch (logErr) {
+      console.warn('⚠️  Failed to log credit transaction:', logErr.message);
+    }
     
-    console.log(`💳 Credits ${amount > 0 ? 'added' : 'removed'}: ${user.email} now has ${newCredits} credits (${amount > 0 ? '+' : ''}${amount})`);
+    console.log(`💳 Credits ${parsedAmount > 0 ? 'added' : 'removed'}: ${user.email} now has ${newCredits} credits (${parsedAmount > 0 ? '+' : ''}${parsedAmount})`);
     
     return res.json({ 
       success: true,
       credits: newCredits,
-      change: amount
+      change: parsedAmount
     });
   } catch (err) {
-    console.error('POST /api/admin/credits error:', err);
+    console.error('❌ POST /api/admin/credits error:', err);
     return res.status(500).json({ error: 'server_error', message: err.message });
   }
 });

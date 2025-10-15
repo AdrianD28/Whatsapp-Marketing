@@ -130,6 +130,18 @@ export function Admin() {
       return;
     }
 
+    if (!selectedUser._id) {
+      console.error('❌ selectedUser._id is missing:', selectedUser);
+      toast.error('Error: Usuario no tiene ID válido');
+      return;
+    }
+
+    console.log('💳 Agregando créditos:', {
+      userId: selectedUser._id,
+      amount: creditsToAdd,
+      userEmail: selectedUser.email
+    });
+
     try {
       const res = await fetch('/api/admin/credits', {
         method: 'POST',
@@ -143,9 +155,11 @@ export function Admin() {
         }),
       });
 
+      const responseData = await res.json();
+      console.log('📡 Respuesta del servidor:', responseData);
+
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Error al agregar créditos');
+        throw new Error(responseData.error || responseData.message || 'Error al agregar créditos');
       }
 
       toast.success(`${creditsToAdd} créditos agregados a ${selectedUser.email}`);
@@ -472,29 +486,38 @@ export function Admin() {
         title="Agregar Créditos"
       >
         <div className="space-y-4">
-          <div className="bg-gray-800 rounded-lg p-4">
-            <p className="text-sm text-gray-400">Usuario seleccionado:</p>
-            <p className="text-white font-semibold">{selectedUser?.email}</p>
-            <p className="text-sm text-gray-400 mt-2">Créditos actuales:</p>
-            <p className="text-2xl font-bold text-green-400">{selectedUser?.credits.toLocaleString()}</p>
-          </div>
-          
-          <Input
-            label="Cantidad de Créditos a Agregar"
-            type="number"
-            value={creditsToAdd}
-            onChange={(e) => setCreditsToAdd(parseInt(e.target.value) || 0)}
-            placeholder="1000"
-            min={1}
-          />
-          
-          {creditsToAdd > 0 && (
-            <div className="bg-green-900/20 border border-green-800 rounded-lg p-3">
-              <p className="text-sm text-green-300">
-                Nuevo balance: <span className="font-bold">
-                  {((selectedUser?.credits || 0) + creditsToAdd).toLocaleString()}
-                </span> créditos
-              </p>
+          {selectedUser ? (
+            <>
+              <div className="bg-gray-800 rounded-lg p-4">
+                <p className="text-sm text-gray-400">Usuario seleccionado:</p>
+                <p className="text-white font-semibold">{selectedUser.email}</p>
+                <p className="text-xs text-gray-500 mt-1">ID: {selectedUser._id}</p>
+                <p className="text-sm text-gray-400 mt-2">Créditos actuales:</p>
+                <p className="text-2xl font-bold text-green-400">{(selectedUser.credits || 0).toLocaleString()}</p>
+              </div>
+              
+              <Input
+                label="Cantidad de Créditos a Agregar"
+                type="number"
+                value={creditsToAdd}
+                onChange={(e) => setCreditsToAdd(parseInt(e.target.value) || 0)}
+                placeholder="1000"
+                min={1}
+              />
+              
+              {creditsToAdd > 0 && (
+                <div className="bg-green-900/20 border border-green-800 rounded-lg p-3">
+                  <p className="text-sm text-green-300">
+                    Nuevo balance: <span className="font-bold">
+                      {((selectedUser.credits || 0) + creditsToAdd).toLocaleString()}
+                    </span> créditos
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="bg-red-900/20 border border-red-800 rounded-lg p-4">
+              <p className="text-red-300 text-sm">Error: No se ha seleccionado ningún usuario</p>
             </div>
           )}
           
