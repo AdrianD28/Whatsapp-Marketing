@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { RefreshCw, Settings, LogIn, LogOut, Menu, User2, ChevronDown, Coins } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { CreditsInfoModal } from '../ui/CreditsInfoModal';
 
 interface HeaderProps {
   title: string;
@@ -33,6 +34,7 @@ export function Header({
   credits,
 }: HeaderProps) {
   const [openMenu, setOpenMenu] = useState(false);
+  const [showCreditsModal, setShowCreditsModal] = useState(false);
   return (
     <motion.header
       initial={{ opacity: 0, y: -20 }}
@@ -70,19 +72,24 @@ export function Header({
             </Button>
           ) : (
             <>
-              {/* Display de créditos */}
+              {/* Display de créditos - Clickeable */}
               {credits !== undefined && (
-                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold ${
-                  credits === 0 
-                    ? 'bg-red-900/30 text-red-300 border border-red-800' 
-                    : credits < 100 
-                    ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800' 
-                    : 'bg-green-900/30 text-green-300 border border-green-800'
-                }`}>
+                <button
+                  onClick={() => setShowCreditsModal(true)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-semibold transition-all cursor-pointer hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 ${
+                    credits === 0 
+                      ? 'bg-red-900/30 text-red-300 border border-red-800 hover:bg-red-900/40 focus:ring-red-600' 
+                      : credits < 100 
+                      ? 'bg-yellow-900/30 text-yellow-300 border border-yellow-800 hover:bg-yellow-900/40 focus:ring-yellow-600' 
+                      : 'bg-green-900/30 text-green-300 border border-green-800 hover:bg-green-900/40 focus:ring-green-600'
+                  }`}
+                  title="Ver información de créditos"
+                  aria-label={`Créditos disponibles: ${credits}. Click para ver más información`}
+                >
                   <Coins className="w-4 h-4" />
                   <span className="hidden sm:inline">{credits.toLocaleString()}</span>
                   <span className="sm:hidden">{credits > 999 ? `${(credits/1000).toFixed(1)}k` : credits}</span>
-                </div>
+                </button>
               )}
               
               <button
@@ -119,6 +126,13 @@ export function Header({
           </Button>
         </div>
       </div>
+
+      {/* Modal de información de créditos */}
+      <CreditsInfoModal
+        isOpen={showCreditsModal}
+        onClose={() => setShowCreditsModal(false)}
+        currentCredits={credits || 0}
+      />
     </motion.header>
   );
 }

@@ -56,7 +56,10 @@ export function Admin() {
   const loadUsers = async () => {
     setLoading(true);
     try {
+      console.log('🔍 Cargando usuarios...');
       const res = await fetch('/api/admin/users', { headers: getAuthHeaders() });
+      console.log('📡 Respuesta del servidor:', res.status, res.statusText);
+      
       if (!res.ok) {
         if (res.status === 403) {
           toast.error('No tienes permisos de administrador');
@@ -64,9 +67,13 @@ export function Admin() {
         throw new Error('Error al cargar usuarios');
       }
       const data = await res.json();
+      console.log('📦 Datos recibidos:', data);
+      console.log('👥 Usuarios en data.users:', data.users);
+      console.log('📊 Cantidad de usuarios:', data.users?.length || 0);
+      
       setUsers(data.users || []);
     } catch (err: any) {
-      console.error('Error loading users:', err);
+      console.error('❌ Error loading users:', err);
       toast.error(err.message || 'Error al cargar usuarios');
     } finally {
       setLoading(false);
@@ -298,7 +305,14 @@ export function Admin() {
       {/* Tabla de usuarios */}
       <Card>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          {users.length === 0 ? (
+            <div className="text-center py-12">
+              <Users className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-400 text-lg mb-2">No hay usuarios registrados</p>
+              <p className="text-gray-500 text-sm">Crea el primer usuario para comenzar</p>
+            </div>
+          ) : (
+            <table className="w-full">
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="text-left py-3 px-4 text-gray-400 font-medium">Usuario</th>
@@ -372,6 +386,7 @@ export function Admin() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </Card>
 
