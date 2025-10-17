@@ -32,22 +32,22 @@ export function TemplatePreviewModal({ isOpen, onClose, template }: TemplatePrev
                 )}
               </div>
             )}
-            {/* Render botones si existen */}
-            {template.components.filter((c: any) => c.type === 'BUTTONS').map((btnComp: any, idx: number) => (
-              <div key={idx} className="mt-3 flex flex-wrap gap-2">
-                {(btnComp.buttons || []).map((b: any, i: number) => (
-                  <button key={i} className="bg-white/10 text-white text-xs px-3 py-1 rounded">
-                    {b.text || (b.type === 'URL' ? 'Abrir' : b.type === 'PHONE_NUMBER' ? 'Llamar' : 'Acción')}
-                  </button>
-                ))}
-              </div>
-            ))}
             <div className="whitespace-pre-wrap text-sm font-sans leading-relaxed">
               {body?.text || 'Sin contenido'}
             </div>
             {footer?.text && (
               <div className="mt-2 text-sm opacity-90 italic">{footer.text}</div>
             )}
+            {/* Render botones al final del mensaje */}
+            {template.components.filter((c: any) => c.type === 'BUTTONS').map((btnComp: any, idx: number) => (
+              <div key={idx} className="mt-3 flex flex-col gap-2 border-t border-white/20 pt-3">
+                {(btnComp.buttons || []).map((b: any, i: number) => (
+                  <button key={i} className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded text-center transition">
+                    {b.text || (b.type === 'URL' ? '🔗 Abrir' : b.type === 'PHONE_NUMBER' ? '📞 Llamar' : '✓ Acción')}
+                  </button>
+                ))}
+              </div>
+            ))}
             <div className="flex justify-end mt-2">
               <span className="text-xs text-green-100 opacity-75">
                 {new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}

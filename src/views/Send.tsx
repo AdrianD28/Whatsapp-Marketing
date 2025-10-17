@@ -834,7 +834,7 @@ export function Send({ onMessageSent }: SendProps) {
 
               // BUTTONS
               const buttonsComp = selectedTemplate.components.find((c: any) => c.type === 'BUTTONS') as any;
-              const renderedButtons: { label: string; url?: string }[] = [];
+              const renderedButtons: { label: string; url?: string; phone?: string }[] = [];
               if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
                 buttonsComp.buttons.forEach((b: any, idx: number) => {
                   if (b.type === 'URL') {
@@ -843,6 +843,8 @@ export function Send({ onMessageSent }: SendProps) {
                     renderedButtons.push({ label: b.text || `Botón ${idx+1}`, url });
                   } else if (b.type === 'QUICK_REPLY') {
                     renderedButtons.push({ label: b.text || `Botón ${idx+1}` });
+                  } else if (b.type === 'PHONE_NUMBER') {
+                    renderedButtons.push({ label: b.text || `Botón ${idx+1}`, phone: b.phone_number || '' });
                   }
                 });
               }
@@ -876,10 +878,12 @@ export function Send({ onMessageSent }: SendProps) {
                       )}
                       <div className="text-sm text-gray-100 whitespace-pre-wrap break-words leading-relaxed">{bodyText}</div>
                       {renderedButtons.length > 0 && (
-                        <div className="flex flex-col gap-2 pt-2">
+                        <div className="flex flex-col gap-2 pt-2 border-t border-gray-600 mt-3">
                           {renderedButtons.map((b, i) => (
                             <div key={i} className="text-center text-xs font-medium px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 transition cursor-default border border-gray-600 text-gray-200">
-                              {b.label}{b.url ? <span className="block text-[10px] font-normal text-green-400 mt-1 truncate">{b.url}</span> : null}
+                              {b.label}
+                              {b.url && <span className="block text-[10px] font-normal text-green-400 mt-1 truncate">{b.url}</span>}
+                              {b.phone && <span className="block text-[10px] font-normal text-blue-400 mt-1">{b.phone}</span>}
                             </div>
                           ))}
                         </div>

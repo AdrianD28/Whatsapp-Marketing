@@ -166,9 +166,15 @@ app.post('/webhook/whatsapp', async (req, res) => {
                   lastRecipient: s.recipient_id,
                   error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
                 };
+                
+                // Agregar el estado al historial de estados
                 await db.collection('message_events').updateOne(
                   { userId: userIdObj, messageId },
-                  { $set: update, $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null } },
+                  { 
+                    $set: update, 
+                    $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null },
+                    $addToSet: { statusHistory: s.status } // Rastrea todos los estados por los que pasa
+                  },
                   { upsert: true }
                 );
               }
@@ -1085,7 +1091,11 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
         // crear registro base de evento si no existe
         await db.collection('message_events').updateOne(
           { userId: userIdObj, messageId },
-          { $setOnInsert: { userId: userIdObj, messageId, status: 'sent', createdAt: new Date().toISOString() }, $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null } },
+          { 
+            $setOnInsert: { userId: userIdObj, messageId, status: 'sent', createdAt: new Date().toISOString() }, 
+            $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null },
+            $addToSet: { statusHistory: 'sent' }
+          },
           { upsert: true }
         );
       }
@@ -1233,7 +1243,8 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
       { userId: new ObjectId(userId), messageId: logDoc.messageId },
       { 
         $setOnInsert: { userId: new ObjectId(userId), messageId: logDoc.messageId, status: 'sent', createdAt: new Date().toISOString() }, 
-        $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null } 
+        $set: { updatedAt: new Date().toISOString(), lastRecipient: String(to), batchId: batchId || null },
+        $addToSet: { statusHistory: 'sent' }
       },
       { upsert: true }
     );
@@ -2094,15 +2105,41 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
     }
   const campaigns = Array.from(byCampaign.values()).sort((a, b) => (+new Date(b.timestamp)) - (+new Date(a.timestamp))).slice(0, limit);
     // Para cada campaña, contar estados desde message_events
+    // IMPORTANTE: Usamos statusHistory para contar delivered correctamente
+    // Un mensaje que fue delivered Y luego read debe contar en AMBOS
     for (const c of campaigns) {
       const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
-      const pipeline = [
-        { $match: match },
-        { $group: { _id: '$status', count: { $sum: 1 } } }
-      ];
-      const agg = await db.collection('message_events').aggregate(pipeline).toArray();
-      const counts = Object.fromEntries(agg.map(x => [x._id || 'unknown', x.count]));
-      c['counts'] = counts;
+      
+      // Contar mensajes que ALGUNA VEZ fueron delivered (incluso si ahora están read)
+      const deliveredCount = await db.collection('message_events').countDocuments({
+        ...match,
+        statusHistory: 'delivered'
+      });
+      
+      // Contar mensajes que ALGUNA VEZ fueron read
+      const readCount = await db.collection('message_events').countDocuments({
+        ...match,
+        statusHistory: 'read'
+      });
+      
+      // Contar mensajes con error
+      const failedCount = await db.collection('message_events').countDocuments({
+        ...match,
+        $or: [
+          { statusHistory: 'failed' },
+          { statusHistory: 'undelivered' }
+        ]
+      });
+      
+      // Total de mensajes en esta campaña
+      const totalCount = await db.collection('message_events').countDocuments(match);
+      
+      c['counts'] = {
+        delivered: deliveredCount,
+        read: readCount,
+        failed: failedCount,
+        total: totalCount
+      };
     }
     return res.json({ data: campaigns });
   } catch (err) {
@@ -2134,13 +2171,40 @@ app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
     if (q) evFilter['lastRecipient'] = { $regex: q.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), $options: 'i' };
     const cursor = db.collection('message_events').find(evFilter).sort({ updatedAt: -1 }).skip(skip).limit(limit);
     const events = await cursor.toArray();
-    // Totales
-    const pipeline = [
-      { $match: { userId: userIdObj, batchId: id } },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
-    ];
-    const agg = await db.collection('message_events').aggregate(pipeline).toArray();
-    const counts = Object.fromEntries(agg.map(x => [x._id || 'unknown', x.count]));
+    // Totales usando statusHistory para contar correctamente
+    const deliveredCount = await db.collection('message_events').countDocuments({
+      userId: userIdObj,
+      batchId: id,
+      statusHistory: 'delivered'
+    });
+    
+    const readCount = await db.collection('message_events').countDocuments({
+      userId: userIdObj,
+      batchId: id,
+      statusHistory: 'read'
+    });
+    
+    const failedCount = await db.collection('message_events').countDocuments({
+      userId: userIdObj,
+      batchId: id,
+      $or: [
+        { statusHistory: 'failed' },
+        { statusHistory: 'undelivered' }
+      ]
+    });
+    
+    const totalCount = await db.collection('message_events').countDocuments({
+      userId: userIdObj,
+      batchId: id
+    });
+    
+    const counts = {
+      delivered: deliveredCount,
+      read: readCount,
+      failed: failedCount,
+      total: totalCount
+    };
+    
     // Intentar recuperar metadata de la sesión
     const session = await db.collection('sessions').findOne({ userId: req.userId, campaignId: id });
     const meta = session ? {
