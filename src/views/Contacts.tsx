@@ -56,7 +56,11 @@ export function Contacts() {
         if (ls[0]) setSelectedList(ls[0]._id);
         if (ls[0]) {
           const cs = await db.getContacts(ls[0]._id);
-          setContacts(cs.map((c: any) => ({ Nombre: c.nombre, Numero: c.numero, email: c.email })));
+          // Preservar todas las columnas dinámicas del contacto
+          setContacts(cs.map((c: any) => ({ 
+            Numero: c.numero,
+            ...c.data // data contiene todas las columnas adicionales
+          })));
         }
       } catch {}
     };
@@ -67,7 +71,11 @@ export function Contacts() {
   const refreshContactsFor = async (listId: string) => {
     try {
       const refreshed = await db.getContacts(listId);
-      setContacts(refreshed.map((c: any) => ({ Nombre: c.nombre, Numero: c.numero, email: c.email })));
+      // Preservar todas las columnas dinámicas del contacto
+      setContacts(refreshed.map((c: any) => ({ 
+        Numero: c.numero,
+        ...c.data // data contiene todas las columnas adicionales
+      })));
     } catch {}
   };
 
@@ -142,25 +150,35 @@ export function Contacts() {
       }
 
       const headers = jsonData[0];
-      const requiredColumns = ['Nombre', 'Numero'];
-      const hasRequiredHeaders = requiredColumns.every(header => headers.includes(header));
+      
+      // Solo requerimos la columna CELULAR
+      const cellColumnIndex = headers.findIndex((h: any) => 
+        String(h).toLowerCase() === 'celular'
+      );
 
-      if (!hasRequiredHeaders) {
-        toast.error('El archivo Excel debe tener las columnas "Nombre" y "Numero"');
+      if (cellColumnIndex === -1) {
+        toast.error('El archivo Excel debe tener la columna "CELULAR"');
         return;
       }
 
+      // Procesar todas las columnas dinámicamente
       const contactsData: Contact[] = jsonData.slice(1)
         .map(row => {
           const contact: any = {};
           headers.forEach((header, index) => {
             if (header) {
-              contact[header] = row[index];
+              // Normalizar el nombre de la columna CELULAR a "Numero" internamente
+              if (String(header).toLowerCase() === 'celular') {
+                contact['Numero'] = row[index];
+              } else {
+                // Guardar todas las demás columnas con su nombre original
+                contact[String(header)] = row[index];
+              }
             }
           });
           return contact;
         })
-        .filter(contact => contact.Numero);
+        .filter(contact => contact.Numero); // Solo contactos con número válido
 
       // Persistir en lista seleccionada; crear lista por defecto si no hay
       let targetList = selectedList;
@@ -192,8 +210,9 @@ export function Contacts() {
   };
 
   const downloadTemplate = () => {
-    const headers = ['Nombre', 'Numero', 'email'];
-    const data = [headers];
+    const headers = ['CELULAR', '{{1}}', '{{2}}', '{{3}}', '{{4}}', '{{5}}', '{{6}}', '{{7}}', '{{8}}'];
+    const exampleRow = ['573118460278', 'Ejemplo1', 'Ejemplo2', 'Ejemplo3', 'Ejemplo4', 'Ejemplo5', 'Ejemplo6', 'Ejemplo7', 'Ejemplo8'];
+    const data = [headers, exampleRow];
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Contactos");

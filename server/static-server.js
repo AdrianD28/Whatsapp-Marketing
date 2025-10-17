@@ -882,18 +882,27 @@ app.post('/api/contacts/bulk', requireAuth, async (req, res) => {
   
   const now = new Date().toISOString();
   const seen = new Set();
-  const docs = contacts.map(c => ({
-    ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
-    listId: String(listId),
-    nombre: String(c.Nombre ?? c.nombre ?? '').trim().slice(0, 120),
-    numero: String((c.Numero ?? c.numero ?? '')).replace(/\D+/g, '').slice(0, 32),
-    email: (c.email || c.Email) ? String(c.email || c.Email).trim().slice(0, 254) : undefined,
-    // 🚨 NUEVO: Opt-in por defecto al importar (asumimos consentimiento si usuario los sube)
-    optInDate: c.optInDate || now,
-    optInSource: c.optInSource || optInSource || 'bulk_import',
-    optedOut: false,
-    createdAt: now,
-  })).filter(d => d.numero && !seen.has(d.numero) && seen.add(d.numero));
+  const docs = contacts.map(c => {
+    // Extraer Numero (normalizado)
+    const numero = String((c.Numero ?? c.numero ?? '')).replace(/\D+/g, '').slice(0, 32);
+    
+    // Crear objeto con todas las columnas dinámicas (excepto Numero que ya lo procesamos)
+    const data = { ...c };
+    delete data.Numero;
+    delete data.numero;
+    
+    return {
+      ...(req.userId ? { userId: req.userId } : { accountKey: req.accountKey }),
+      listId: String(listId),
+      numero,
+      data, // Guardar TODAS las columnas adicionales aquí
+      // Opt-in por defecto al importar (asumimos consentimiento si usuario los sube)
+      optInDate: c.optInDate || now,
+      optInSource: c.optInSource || optInSource || 'bulk_import',
+      optedOut: false,
+      createdAt: now,
+    };
+  }).filter(d => d.numero && !seen.has(d.numero) && seen.add(d.numero));
   
   if (!docs.length) return res.status(400).json({ error: 'no_valid_contacts' });
   await db.collection('contacts').insertMany(docs, { ordered: false });

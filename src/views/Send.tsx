@@ -179,8 +179,7 @@ export function Send({ onMessageSent }: SendProps) {
         // Preparar contactos con todos los campos necesarios
         const contactsForBackend = contacts.map(c => ({
           numero: String(c.Numero || '').replace(/[^\d]/g, '').replace(/^00/, ''),
-          Nombre: c.Nombre || '',
-          ...c
+          ...c // Incluir TODAS las columnas dinámicas del Excel
         }));
 
         const result = await createCampaign({
@@ -283,8 +282,8 @@ export function Send({ onMessageSent }: SendProps) {
                 const index = p.replace(/\{\{|\}\}/g, '');
                 const mapKey = `body:${index}`;
                 const field = paramMap[mapKey];
-                const fallback = index === '1' ? 'Nombre' : 'Numero';
-                const key = field || fallback;
+                // Si no hay mapeo, usar el nombre de columna {{index}} directamente
+                const key = field || `{{${index}}}`;
                 const value = (contact as any)[key] ?? '';
                 return { type: 'text', text: String(value) } as any;
               }) : [];
@@ -299,22 +298,24 @@ export function Send({ onMessageSent }: SendProps) {
                   const idx = m.replace(/\{\{|\}\}/g, '');
                   const mapKey = `header:${idx}`;
                   const field = paramMap[mapKey];
-                  const fallback = idx === '1' ? 'Nombre' : 'Numero';
-                  const key = field || fallback;
+                  // Si no hay mapeo, usar el nombre de columna {{index}} directamente
+                  const key = field || `{{${idx}}}`;
                   const val = (contact as any)[key] ?? '';
                   params.unshift({ type: 'header-text', text: String(val) });
                 }
               }
             }
 
-            // BUTTON URL params si existen (primer valor usa Numero por defecto)
+            // BUTTON URL params si existen
             const buttonsComp = selectedTemplate.components.find((c: any) => c.type === 'BUTTONS') as any;
             if (buttonsComp && Array.isArray(buttonsComp.buttons)) {
               buttonsComp.buttons.forEach((b: any, idx: number) => {
                 if (b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || '')) {
                   const mapKey = `button:${idx}`;
-                  const field = paramMap[mapKey] || 'Numero';
-                  const value = String((contact as any)[field] ?? '');
+                  const field = paramMap[mapKey];
+                  // Si no hay mapeo, usar CELULAR/Numero como default
+                  const key = field || 'Numero';
+                  const value = String((contact as any)[key] ?? '');
                   params.push({ type: 'button', sub_type: 'url', index: idx, text: value });
                 }
               });
@@ -811,9 +812,11 @@ export function Send({ onMessageSent }: SendProps) {
                 const key = `${scope}:${index}`;
                 const field = paramMap[key];
                 if (field && typeof first[field] !== 'undefined') return String(first[field]);
-                // Fallbacks: {{1}} => Nombre, {{2+}} => Numero si no hay campo
-                if (index === '1') return String(first['Nombre'] || first['nombre'] || '');
-                return String(first['Numero'] || first['numero'] || '');
+                // Si no hay mapeo, buscar columna con nombre {{index}}
+                const columnName = `{{${index}}}`;
+                if (typeof first[columnName] !== 'undefined') return String(first[columnName]);
+                // Fallback a Numero si no hay nada
+                return String(first['Numero'] || '');
               };
 
               // BODY
