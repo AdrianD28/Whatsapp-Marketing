@@ -287,26 +287,42 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
 
             <div className="pt-2">
             <label className="block text-sm font-medium text-gray-200 mb-2">Botones</label>
+            <div className="text-xs text-gray-400 mb-3">
+              Máximo 3 botones de respuesta rápida o 2 botones de URL/Llamada
+            </div>
             <div className="space-y-3">
               {(watch('buttons') || []).map((_, idx) => (
-                <div key={idx} className="border border-gray-700 rounded-lg p-3 bg-gray-800">
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
-                    <div>
-                      <label className="block text-xs text-gray-300 mb-1">Tipo</label>
-                      <select {...register(`buttons.${idx}.type` as const)} className="w-full rounded border-gray-600 bg-gray-700 text-white">
-                        <option value="QUICK_REPLY">Quick Reply</option>
-                        <option value="URL">URL</option>
-                        <option value="PHONE_NUMBER">Teléfono</option>
-                      </select>
+                <div key={idx} className="border border-gray-700 rounded-lg p-4 bg-gray-800">
+                  <div className="space-y-3">
+                    {/* Tipo y Texto en la misma línea */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Tipo de botón</label>
+                        <select {...register(`buttons.${idx}.type` as const)} className="w-full rounded border-gray-600 bg-gray-700 text-white p-2">
+                          <option value="QUICK_REPLY">Respuesta Rápida</option>
+                          <option value="URL">URL</option>
+                          <option value="PHONE_NUMBER">Teléfono</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Texto del botón</label>
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-gray-400" />
+                          <input 
+                            {...register(`buttons.${idx}.text` as const)} 
+                            placeholder="Texto del botón"
+                            className="flex-1 rounded border-gray-600 bg-gray-700 text-white p-2"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <Input label="Texto" placeholder="Texto del botón" icon={MessageSquare} {...register(`buttons.${idx}.text` as const)} />
-                    </div>
+                    
+                    {/* Campos específicos según tipo */}
                     {watch(`buttons.${idx}.type` as const) === 'URL' && (
-                      <>
+                      <div className="space-y-3">
                         <div>
-                          <div className="flex items-center">
-                            <Input label="URL" placeholder="https://... o ...?q={{1}}" icon={LinkIcon} {...register(`buttons.${idx}.url` as const)} />
+                          <div className="flex items-center gap-2 mb-2">
+                            <label className="block text-sm text-gray-300">URL del botón</label>
                             <HelpTooltip title="URL con variables" tooltip="Cómo completar el ejemplo">
                               <p>
                                 Si tu URL de botón incluye variables como <code>{"{{1}}"}</code>, Meta exige un ejemplo de valor para aprobación. 
@@ -314,35 +330,81 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                               </p>
                             </HelpTooltip>
                           </div>
+                          <div className="flex items-center gap-2">
+                            <LinkIcon className="w-4 h-4 text-gray-400" />
+                            <input 
+                              {...register(`buttons.${idx}.url` as const)} 
+                              placeholder="https://... o ...?q={{1}}"
+                              className="flex-1 rounded border-gray-600 bg-gray-700 text-white p-2"
+                            />
+                          </div>
                         </div>
                         <div>
-                          <Input label="Ejemplo (si URL tiene {{}})" placeholder="valor-ejemplo" {...register(`buttons.${idx}.urlExample` as const)} />
+                          <label className="block text-sm text-gray-300 mb-2">Ejemplo (si URL tiene {"{{}}"})</label>
+                          <input 
+                            {...register(`buttons.${idx}.urlExample` as const)} 
+                            placeholder="valor-ejemplo"
+                            className="w-full rounded border-gray-600 bg-gray-700 text-white p-2"
+                          />
                         </div>
-                      </>
-                    )}
-                    {watch(`buttons.${idx}.type` as const) === 'PHONE_NUMBER' && (
-                      <div>
-                        <Input label="Número" placeholder="15550051234" icon={Phone} {...register(`buttons.${idx}.phone_number` as const)} />
                       </div>
                     )}
-                    <div className="flex justify-end">
+                    
+                    {watch(`buttons.${idx}.type` as const) === 'PHONE_NUMBER' && (
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">Número de teléfono</label>
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 text-gray-400" />
+                          <input 
+                            {...register(`buttons.${idx}.phone_number` as const)} 
+                            placeholder="15550051234"
+                            className="flex-1 rounded border-gray-600 bg-gray-700 text-white p-2"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Botón eliminar */}
+                    <div className="flex justify-end pt-2 border-t border-gray-700">
                       <Button type="button" variant="secondary" onClick={() => {
                         const current = watch('buttons') || [];
                         const next = current.slice();
                         next.splice(idx,1);
                         setValue('buttons', next as any, { shouldValidate: true });
                       }}>
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4 mr-1" /> Eliminar botón
                       </Button>
                     </div>
                   </div>
                 </div>
               ))}
-              <Button type="button" onClick={() => {
-                const current = watch('buttons') || [];
-                const next = current.concat({ type: 'QUICK_REPLY', text: '' } as any);
-                setValue('buttons', next as any, { shouldValidate: true });
-              }}>
+              <Button 
+                type="button" 
+                onClick={() => {
+                  const current = watch('buttons') || [];
+                  
+                  // Validar límites según tipo
+                  const urlOrPhoneButtons = current.filter((b: any) => 
+                    b.type === 'URL' || b.type === 'PHONE_NUMBER'
+                  );
+                  
+                  // Si ya hay 2 botones de URL/Teléfono y el último añadido fue de ese tipo
+                  if (urlOrPhoneButtons.length >= 2) {
+                    alert('Solo puedes tener máximo 2 botones de URL o Llamada');
+                    return;
+                  }
+                  
+                  // Si ya hay 3 botones en total
+                  if (current.length >= 3) {
+                    alert('Solo puedes tener máximo 3 botones en total');
+                    return;
+                  }
+                  
+                  const next = current.concat({ type: 'QUICK_REPLY', text: '' } as any);
+                  setValue('buttons', next as any, { shouldValidate: true });
+                }}
+                disabled={(watch('buttons') || []).length >= 3}
+              >
                 <Plus className="w-4 h-4 mr-1" /> Añadir botón
               </Button>
             </div>
@@ -382,19 +444,19 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
             {(watchedValues.headerType === 'IMAGE' || watchedValues.headerType === 'VIDEO' || watchedValues.headerType === 'DOCUMENT') && imageUrl && (
               <img src={imageUrl} alt="header" className="rounded mb-2 max-h-40 object-cover" onError={() => setImageUrl('')} />
             )}
-            {/* Render botones en preview */}
+            <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed">
+              {preview || 'Escribe tu mensaje para ver la vista previa...'}
+            </pre>
+            {/* Render botones en preview al FINAL del mensaje */}
             {Array.isArray(watchedValues.buttons) && watchedValues.buttons.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-col gap-2 border-t border-white/20 pt-3">
                 {watchedValues.buttons.map((b: any, i: number) => (
-                  <button key={i} className="bg-white/10 text-white text-xs px-3 py-1 rounded">
-                    {b.text || (b.type === 'URL' ? 'Abrir' : b.type === 'PHONE_NUMBER' ? 'Llamar' : 'Acción')}
+                  <button key={i} className="bg-white/10 hover:bg-white/20 text-white text-xs px-3 py-2 rounded text-center transition">
+                    {b.text || (b.type === 'URL' ? '🔗 Abrir' : b.type === 'PHONE_NUMBER' ? '📞 Llamar' : '✓ Acción')}
                   </button>
                 ))}
               </div>
             )}
-            <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed">
-              {preview || 'Escribe tu mensaje para ver la vista previa...'}
-            </pre>
             <div className="flex justify-end mt-2">
               <span className="text-xs text-green-100 opacity-75">
                 {new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}

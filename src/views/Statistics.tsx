@@ -42,12 +42,16 @@ export function Statistics() {
       // Si no hay eventos aún, usar el total de la sesión si está disponible
       const recipients = total > 0 ? total : ((c as any).total || 0);
       
-      // Estados específicos  
+      // Estados específicos
+      // IMPORTANTE: Los entregados deben incluir SOLO los delivered (no los leídos)
+      // Los leídos son una métrica separada
       const delivered = counts['delivered'] || 0;
       const read = counts['read'] || 0;
       const failed = (counts['failed'] || 0) + (counts['undelivered'] || 0);
       
       // Tasas de entrega y lectura
+      // La tasa de entrega es: (delivered + read) / total
+      // La tasa de lectura es: read / total
       const deliveryRate = recipients > 0 ? Math.round(((delivered + read) / recipients) * 100) : 0;
       const readRate = recipients > 0 ? Math.round((read / recipients) * 100) : 0;
       

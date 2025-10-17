@@ -43,7 +43,7 @@ export function Send({ onMessageSent }: SendProps) {
   const { templates, contacts, sendProgress, setSendProgress, apiCredentials, addActivity, addSendSession } = useAppContext();
   const { sendMessage } = useApi(apiCredentials);
   const { createCampaign } = useCampaigns();
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<SendFormData>({
+  const { register, handleSubmit, watch, formState: { errors }, setValue } = useForm<SendFormData>({
     defaultValues: { delay: 5, useBackgroundMode: false }
   });
 
@@ -112,19 +112,8 @@ export function Send({ onMessageSent }: SendProps) {
 
   const isValidHttpUrl = (s?: string) => !!s && /^https?:\/\//i.test(s);
 
-  // Strict Mode (localStorage)
-  const STRICT_KEY = 'strictMode';
-  const [strictMode, setStrictMode] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem(STRICT_KEY);
-      return v === null ? false : v === 'true';
-    } catch { return true; }
-  });
-  const toggleStrictMode = () => {
-    const next = !strictMode;
-    setStrictMode(next);
-    try { localStorage.setItem(STRICT_KEY, String(next)); } catch {}
-  };
+  // Strict Mode (siempre ON)
+  const strictMode = true;
 
   const onSubmit = async (data: SendFormData) => {
     if (contacts.length === 0) {
@@ -337,7 +326,7 @@ export function Send({ onMessageSent }: SendProps) {
                 if (cached?.id) {
                   params.unshift({ type: 'image', image: { id: cached.id } });
                   if (!mediaLogged) {
-                    addActivity({ title: 'Media fijada (estricto)', description: `Usando media id ${cached.id} para ${selectedTemplate.name}`, type: 'info' });
+                    addActivity({ title: 'Media configurada', description: `Usando media id ${cached.id} para ${selectedTemplate.name}`, type: 'info' });
                     mediaLogged = true;
                   }
                 } else {
@@ -363,7 +352,7 @@ export function Send({ onMessageSent }: SendProps) {
                           setTemplateMedia(selectedTemplate.name, { id: j.id });
                           params.unshift({ type: 'image', image: { id: j.id } });
                           if (!mediaLogged) {
-                            addActivity({ title: 'Media subida (estricto)', description: `Se obtuvo media id ${j.id} para ${selectedTemplate.name}`, type: 'success' });
+                            addActivity({ title: 'Media subida correctamente', description: `Se obtuvo media id ${j.id} para ${selectedTemplate.name}`, type: 'success' });
                             mediaLogged = true;
                           }
                         } else {
@@ -374,10 +363,10 @@ export function Send({ onMessageSent }: SendProps) {
                         throw new Error('Fallo al subir la imagen para obtener media id.');
                       }
                     } catch (e) {
-                      throw new Error('Error al subir imagen para media id en modo estricto.');
+                      throw new Error('Error al subir imagen para obtener media id.');
                     }
                   } else {
-                    throw new Error('Modo estricto: Debes configurar una imagen (media id) subiendo un archivo antes de enviar.');
+                    throw new Error('Debes configurar una imagen (media id) subiendo un archivo antes de enviar.');
                   }
                 }
               } else {
@@ -554,22 +543,6 @@ export function Send({ onMessageSent }: SendProps) {
           </h3>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            {/* Modo estricto */}
-            <div className="flex items-center justify-between p-3 rounded bg-gray-800">
-              <div>
-                <p className="text-white font-medium">Modo estricto de cumplimiento</p>
-                <p className="text-gray-400 text-sm">Usar solo media id en header, checklist previo y delay mínimo 5s.</p>
-              </div>
-              <label className="inline-flex items-center cursor-pointer">
-                <span className="mr-3 text-sm text-gray-300">Off</span>
-                <input type="checkbox" className="sr-only" checked={strictMode} onChange={toggleStrictMode} />
-                <div className="relative">
-                  <div className={`w-12 h-6 rounded-full transition ${strictMode ? 'bg-green-600' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition ${strictMode ? 'translate-x-6' : ''}`}></div>
-                </div>
-                <span className="ml-3 text-sm text-gray-300">On</span>
-              </label>
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-200 mb-2">
                 Plantilla a Enviar
@@ -692,13 +665,13 @@ export function Send({ onMessageSent }: SendProps) {
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
                         <div className="flex-1">
-                          <label className="block text-sm font-medium text-gray-200 mb-1">Imagen de cabecera (modo estricto)</label>
-                          <p className="text-xs text-gray-400">Se exige media id. Sube una imagen una sola vez para obtenerla y quedará fijada por plantilla.</p>
+                          <label className="block text-sm font-medium text-gray-200 mb-1">Imagen de cabecera</label>
+                          <p className="text-xs text-gray-400">Sube una imagen una sola vez para obtener el media id y quedará configurada para esta plantilla.</p>
                           <div className="mt-2 text-sm text-gray-300">
                             {cached?.id ? `Media id configurado: ${cached.id}` : 'Sin media id configurado aún.'}
                           </div>
                         </div>
-                        <HelpTooltip title="Políticas Meta (estricto)" tooltip="Reglas de uso de imagen en header">
+                        <HelpTooltip title="Políticas Meta" tooltip="Reglas de uso de imagen en header">
                           <ul className="list-disc ml-4">
                             <li>Solo se usa media id, evitando URLs dinámicas.</li>
                             <li>La imagen debe ser coherente con el template y el contenido.</li>
@@ -762,20 +735,8 @@ export function Send({ onMessageSent }: SendProps) {
               })()
             )}
 
-            <Input
-              label="Retraso entre mensajes (segundos)"
-              type="number"
-              min={1}
-              max={60}
-              {...register('delay', { 
-                required: 'El retraso es obligatorio',
-                min: { value: 1, message: 'Mínimo 1 segundo' },
-                max: { value: 60, message: 'Máximo 60 segundos' }
-              })}
-              error={errors.delay?.message}
-              helperText="Recomendado: 5-10 segundos para evitar bloqueos"
-              disabled={sending}
-            />
+            {/* Campo oculto para delay - siempre 5 segundos */}
+            <input type="hidden" {...register('delay')} value={5} />
 
             <div className="flex gap-3 pt-4">
               {!sending ? (
@@ -969,7 +930,7 @@ export function Send({ onMessageSent }: SendProps) {
         </div>
       </div>
 
-      {/* Checklist Modal (estricto) */}
+      {/* Checklist Modal */}
       {showChecklist && (
         <Modal isOpen={showChecklist} onClose={() => setShowChecklist(false)} title="Checklist de cumplimiento">
           <div className="space-y-3 text-sm text-gray-200">
