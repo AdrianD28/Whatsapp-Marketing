@@ -126,6 +126,38 @@ export function Send({ onMessageSent }: SendProps) {
       return;
     }
 
+    // Validar que los contactos tengan las columnas necesarias
+    const bodyComp = selectedTemplate.components.find(c => c.type === 'BODY');
+    const params = bodyComp?.text?.match(/\{\{(\d+)\}\}/g);
+    
+    if (params && params.length > 0 && contacts.length > 0) {
+      const firstContact = contacts[0] as any;
+      const missingColumns: string[] = [];
+      
+      params.forEach(p => {
+        const index = p.replace(/\{\{|\}\}/g, '');
+        const mapKey = `body:${index}`;
+        const field = paramMap[mapKey];
+        const columnName = field || `{{${index}}}`;
+        
+        // Verificar si existe la columna
+        if (!firstContact[columnName] && firstContact[columnName] !== 0) {
+          missingColumns.push(`{{${index}}} (buscando columna: "${columnName}")`);
+        }
+      });
+      
+      if (missingColumns.length > 0) {
+        const message = `⚠️ Faltan columnas en tus contactos:\n\n${missingColumns.join('\n')}\n\n` +
+                       `📋 Opciones:\n` +
+                       `1. Mapea manualmente cada variable a una columna existente\n` +
+                       `2. O asegúrate de que tu Excel tenga columnas llamadas: ${params.map(p => p.replace(/\{\{|\}\}/g, '')).map(i => `{{${i}}}`).join(', ')}`;
+        
+        if (!confirm(message + '\n\n¿Deseas continuar de todas formas? (Se usarán placeholders para valores faltantes)')) {
+          return;
+        }
+      }
+    }
+
     // NUEVO: Si hay más de 100 contactos, ofrecer modo background
     if (contacts.length > 100 && !data.useBackgroundMode) {
       const useBackground = confirm(
@@ -282,10 +314,28 @@ export function Send({ onMessageSent }: SendProps) {
                 const index = p.replace(/\{\{|\}\}/g, '');
                 const mapKey = `body:${index}`;
                 const field = paramMap[mapKey];
-                // Si no hay mapeo, usar el nombre de columna {{index}} directamente
-                const key = field || `{{${index}}}`;
-                const value = (contact as any)[key] ?? '';
-                return { type: 'text', text: String(value) } as any;
+                
+                // Intentar obtener el valor
+                let value = '';
+                if (field) {
+                  // Si hay mapeo configurado, usar ese campo
+                  const rawValue = (contact as any)[field];
+                  value = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                } else {
+                  // Si no hay mapeo, buscar columna con nombre {{index}}
+                  const columnName = `{{${index}}}`;
+                  const rawValue = (contact as any)[columnName];
+                  value = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                }
+                
+                // CRÍTICO: WhatsApp NO acepta strings vacíos
+                // Si el valor está vacío, usar un espacio o placeholder
+                if (!value || value === '') {
+                  value = ' '; // Usar un espacio como mínimo
+                  console.warn(`⚠️ Parámetro {{${index}}} vacío para ${contact.Numero}. Usando espacio. Campo: ${field || `{{${index}}}`}`);
+                }
+                
+                return { type: 'text', text: value } as any;
               }) : [];
 
             // HEADER TEXT params si la plantilla lo requiere
@@ -298,10 +348,25 @@ export function Send({ onMessageSent }: SendProps) {
                   const idx = m.replace(/\{\{|\}\}/g, '');
                   const mapKey = `header:${idx}`;
                   const field = paramMap[mapKey];
-                  // Si no hay mapeo, usar el nombre de columna {{index}} directamente
-                  const key = field || `{{${idx}}}`;
-                  const val = (contact as any)[key] ?? '';
-                  params.unshift({ type: 'header-text', text: String(val) });
+                  
+                  // Intentar obtener el valor
+                  let val = '';
+                  if (field) {
+                    const rawValue = (contact as any)[field];
+                    val = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                  } else {
+                    const columnName = `{{${idx}}}`;
+                    const rawValue = (contact as any)[columnName];
+                    val = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                  }
+                  
+                  // CRÍTICO: WhatsApp NO acepta strings vacíos
+                  if (!val || val === '') {
+                    val = ' '; // Usar un espacio como mínimo
+                    console.warn(`⚠️ Parámetro header {{${idx}}} vacío. Usando espacio. Campo: ${field || `{{${idx}}}`}`);
+                  }
+                  
+                  params.unshift({ type: 'header-text', text: val });
                 }
               }
             }
@@ -313,9 +378,24 @@ export function Send({ onMessageSent }: SendProps) {
                 if (b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || '')) {
                   const mapKey = `button:${idx}`;
                   const field = paramMap[mapKey];
-                  // Si no hay mapeo, usar CELULAR/Numero como default
-                  const key = field || 'Numero';
-                  const value = String((contact as any)[key] ?? '');
+                  
+                  // Intentar obtener el valor
+                  let value = '';
+                  if (field) {
+                    const rawValue = (contact as any)[field];
+                    value = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                  } else {
+                    // Para botones, si no hay mapeo, usar Numero como fallback
+                    const rawValue = (contact as any)['Numero'];
+                    value = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
+                  }
+                  
+                  // CRÍTICO: WhatsApp NO acepta strings vacíos en botones
+                  if (!value || value === '') {
+                    value = String(contact.Numero || '0000000000');
+                    console.warn(`⚠️ Parámetro button vacío, usando Numero: ${value}`);
+                  }
+                  
                   params.push({ type: 'button', sub_type: 'url', index: idx, text: value });
                 }
               });
