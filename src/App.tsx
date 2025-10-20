@@ -232,7 +232,7 @@ function AppContent() {
                   onClick={() => setShowAuthModal(true)}
                   className="inline-flex items-center px-6 py-3 rounded-md bg-green-600 hover:bg-green-500 text-white font-semibold transition-colors shadow-lg shadow-green-600/20 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-gray-900"
                 >
-                  Crear cuenta / Iniciar sesión
+                  Iniciar sesión
                 </button>
               </div>
             </div>
