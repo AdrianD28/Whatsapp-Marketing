@@ -163,6 +163,15 @@ app.post('/webhook/whatsapp', async (req, res) => {
             errors: s.errors
           });
           
+          // 🚨 ALERTA DE ERROR
+          if (s.status === 'failed' || s.status === 'undelivered') {
+            console.error('❌❌❌ MENSAJE FALLIDO ❌❌❌');
+            console.error('Detalles del error:', JSON.stringify(s, null, 2));
+            if (s.errors && s.errors.length > 0) {
+              console.error('🔥 ERRORES DE WHATSAPP:', JSON.stringify(s.errors, null, 2));
+            }
+          }
+          
           webhookLog.push({
             time: new Date().toISOString(),
             id: s.id,
@@ -1095,8 +1104,13 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     console.log('📥 Respuesta de WhatsApp API:', {
       status: gRes.status,
       ok: gRes.ok,
-      response: graphJson
+      response: JSON.stringify(graphJson, null, 2)
     });
+    
+    // Verificar si hay información adicional de error en la respuesta
+    if (graphJson?.error) {
+      console.error('🔥 ERROR EN RESPUESTA DE WHATSAPP:', JSON.stringify(graphJson.error, null, 2));
+    }
 
     // Insertar log
     let logId = null;
