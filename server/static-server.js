@@ -2161,9 +2161,12 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
   try {
     const db = await getDb();
     const userIdObj = new ObjectId(req.userId);
-    const limit = Math.min(Number(req.query.limit || 50), 200);
+    const page = Math.max(Number(req.query.page || 1), 1);
+    const limit = Math.min(Number(req.query.limit || 20), 200);
+    const skip = (page - 1) * limit;
     const from = req.query.from ? new Date(String(req.query.from)) : null;
     const to = req.query.to ? new Date(String(req.query.to)) : null;
+    
     // Obtener últimas campañas desde sessions o send_logs
     const sessionFilter = { userId: userIdObj };
     if (from || to) {
@@ -2189,7 +2192,14 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
       if (!l.batchId) continue;
       if (!byCampaign.has(l.batchId)) byCampaign.set(l.batchId, { campaignId: l.batchId, templateName: l.templateName, timestamp: l.time });
     }
-  const campaigns = Array.from(byCampaign.values()).sort((a, b) => (+new Date(b.timestamp)) - (+new Date(a.timestamp))).slice(0, limit);
+    
+    // Ordenar todas las campañas
+    const allCampaigns = Array.from(byCampaign.values()).sort((a, b) => (+new Date(b.timestamp)) - (+new Date(a.timestamp)));
+    const totalCampaigns = allCampaigns.length;
+    
+    // Aplicar paginación
+    const campaigns = allCampaigns.slice(skip, skip + limit);
+    
     // Para cada campaña, contar estados desde message_events
     // IMPORTANTE: Usamos statusHistory para contar delivered correctamente
     // Un mensaje que fue delivered Y luego read debe contar en AMBOS
@@ -2227,7 +2237,16 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
         total: totalCount
       };
     }
-    return res.json({ data: campaigns });
+    
+    return res.json({ 
+      data: campaigns,
+      pagination: {
+        page,
+        limit,
+        total: totalCampaigns,
+        pages: Math.ceil(totalCampaigns / limit)
+      }
+    });
   } catch (err) {
     console.error('/api/reports/campaigns error', err);
     return res.status(500).json({ error: 'server_error' });

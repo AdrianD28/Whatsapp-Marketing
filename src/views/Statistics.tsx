@@ -17,18 +17,32 @@ export function Statistics() {
   // Filtros
   const [from, setFrom] = useState<string>('');
   const [to, setTo] = useState<string>('');
+  // Paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCampaigns, setTotalCampaigns] = useState(0);
+  const limit = 20;
 
-  const load = async () => {
+  const load = async (page = 1) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (from) params.set('from', from);
       if (to) params.set('to', to);
+      params.set('page', String(page));
+      params.set('limit', String(limit));
       const url = '/api/reports/campaigns' + (params.toString() ? `?${params.toString()}` : '');
       const r = await fetch(url, { headers: (typeof localStorage !== 'undefined' && localStorage.getItem('auth_token')) ? { Authorization: `Bearer ${localStorage.getItem('auth_token')}` } : {} });
       const j = await r.json();
       const data = j.data || [];
       setCampaigns(data);
+      
+      // Actualizar información de paginación
+      if (j.pagination) {
+        setCurrentPage(j.pagination.page);
+        setTotalPages(j.pagination.pages);
+        setTotalCampaigns(j.pagination.total);
+      }
     } finally { setLoading(false); }
   };
 
@@ -182,7 +196,7 @@ export function Statistics() {
           <h2 className="text-2xl font-bold text-white flex items-center gap-2"><BarChart3 className="w-6 h-6"/> Estadísticas</h2>
           <p className="text-gray-400">Cada envío masivo es una campaña</p>
         </div>
-        <Button variant="secondary" icon={RefreshCw} onClick={load} disabled={loading}>Actualizar</Button>
+        <Button variant="secondary" icon={RefreshCw} onClick={() => load(currentPage)} disabled={loading}>Actualizar</Button>
       </div>
 
       {/* Filtros globales por fecha */}
@@ -197,8 +211,8 @@ export function Statistics() {
             <input type="datetime-local" value={to} onChange={e => setTo(e.target.value)} className="w-full bg-gray-800 text-white rounded px-3 py-2 border border-gray-700" />
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={load}>Aplicar</Button>
-            <Button variant="ghost" onClick={() => { setFrom(''); setTo(''); load(); }}>Limpiar</Button>
+            <Button variant="secondary" onClick={() => load(1)}>Aplicar</Button>
+            <Button variant="ghost" onClick={() => { setFrom(''); setTo(''); load(1); }}>Limpiar</Button>
           </div>
         </div>
         {/* Presets */}
@@ -279,6 +293,38 @@ export function Statistics() {
           </div>
         )}
       </Card>
+      
+      {/* Paginación */}
+      {totalPages > 1 && (
+        <Card>
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-400">
+              Mostrando {campaigns.length} de {totalCampaigns} campañas
+            </div>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={() => load(currentPage - 1)} 
+                disabled={currentPage === 1 || loading}
+              >
+                Anterior
+              </Button>
+              <div className="text-sm text-gray-300">
+                Página {currentPage} de {totalPages}
+              </div>
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={() => load(currentPage + 1)} 
+                disabled={currentPage === totalPages || loading}
+              >
+                Siguiente
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Modal de Detalle */}
       <CampaignDetailModal 
