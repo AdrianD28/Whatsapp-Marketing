@@ -70,11 +70,20 @@ app.get('/webhook/whatsapp', (req, res) => {
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
     const body = req.body || {};
+    
+    // 🔍 LOG COMPLETO DE WEBHOOK RECIBIDO
+    console.log('📩 WEBHOOK RECIBIDO:', JSON.stringify(body, null, 2));
+    
     const db = await getDb();
     // Log minimal info about statuses
     const entries = body.entry || [];
+    
+    console.log(`📊 Entries recibidos: ${entries.length}`);
+    
     for (const e of entries) {
       const changes = e.changes || [];
+      console.log(`📊 Changes en entry: ${changes.length}`);
+      
       for (const c of changes) {
         const v = c.value || {};
         
@@ -143,7 +152,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
         }
         
         const statuses = v.statuses || [];
+        console.log(`📊 Statuses recibidos: ${statuses.length}`);
+        
         for (const s of statuses) {
+          console.log(`✉️ STATUS UPDATE:`, {
+            messageId: s.id,
+            status: s.status,
+            recipient: s.recipient_id,
+            timestamp: s.timestamp,
+            errors: s.errors
+          });
+          
           webhookLog.push({
             time: new Date().toISOString(),
             id: s.id,
@@ -156,10 +175,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
           try {
             const messageId = s.id;
             if (messageId) {
+              console.log(`🔍 Buscando send_log para messageId: ${messageId}`);
+              
               // No conocemos el userId desde el webhook sin verificar; intentamos encontrar por send_logs
               const logDoc = await db.collection('send_logs').findOne({ messageId });
+              
+              console.log(`📄 Send log encontrado:`, logDoc ? 'SÍ' : 'NO');
+              
               if (logDoc?.userId) {
                 const userIdObj = logDoc.userId;
+                console.log(`👤 UserId del log: ${userIdObj}`);
+                
                 const update = {
                   status: s.status,
                   updatedAt: new Date().toISOString(),
@@ -168,7 +194,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 };
                 
                 // Agregar el estado al historial de estados
-                await db.collection('message_events').updateOne(
+                const updateResult = await db.collection('message_events').updateOne(
                   { userId: userIdObj, messageId },
                   { 
                     $set: update, 
@@ -177,9 +203,18 @@ app.post('/webhook/whatsapp', async (req, res) => {
                   },
                   { upsert: true }
                 );
+                
+                console.log(`✅ Message event actualizado:`, {
+                  matched: updateResult.matchedCount,
+                  modified: updateResult.modifiedCount,
+                  upserted: updateResult.upsertedId ? 'SÍ' : 'NO'
+                });
+              } else {
+                console.log(`⚠️ No se encontró userId en send_log para messageId: ${messageId}`);
               }
             }
           } catch (perr) {
+            console.error('❌ webhook persist failed', perr);
             console.warn('webhook persist failed', perr);
           }
         }
@@ -1124,10 +1159,17 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     // Guardar messageId para correlación si existe
     try {
       const messageId = graphJson?.messages?.[0]?.id;
+      console.log('📨 MessageId recibido de WhatsApp:', messageId);
+      
       if (messageId) {
+        console.log(`💾 Guardando messageId ${messageId} en send_log ${logId}`);
+        
         await db.collection('send_logs').updateOne({ _id: logId }, { $set: { messageId } });
+        
+        console.log(`📝 Creando message_event inicial para messageId ${messageId}`);
+        
         // crear registro base de evento si no existe
-        await db.collection('message_events').updateOne(
+        const eventResult = await db.collection('message_events').updateOne(
           { userId: userIdObj, messageId },
           { 
             $setOnInsert: { userId: userIdObj, messageId, status: 'sent', createdAt: new Date().toISOString() }, 
@@ -1136,6 +1178,12 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
           },
           { upsert: true }
         );
+        
+        console.log('✅ Message event inicial creado:', {
+          matched: eventResult.matchedCount,
+          modified: eventResult.modifiedCount,
+          upserted: eventResult.upsertedId ? 'SÍ' : 'NO'
+        });
       }
     } catch {}
 
