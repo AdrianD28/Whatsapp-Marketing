@@ -1058,9 +1058,17 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
   try {
     const db = await getDb();
     const userIdObj = new ObjectId(req.userId);
-    const { to, template, batchId } = req.body || {};
+    let { to, template, batchId } = req.body || {};
     if (!to || typeof to !== 'string') return res.status(400).json({ error: 'invalid_to' });
     if (!template || typeof template !== 'object') return res.status(400).json({ error: 'invalid_template' });
+    
+    // 🔧 NORMALIZAR NÚMERO: Asegurar formato E.164 (+código_país + número)
+    to = String(to).trim().replace(/\s+/g, ''); // Quitar espacios
+    if (!to.startsWith('+')) {
+      to = '+' + to; // Agregar + si falta
+    }
+    
+    console.log('📞 Número normalizado para envío:', to);
 
     const user = await db.collection('users').findOne({ _id: userIdObj }, { projection: { metaCreds: 1, credits: 1 } });
     const creds = user?.metaCreds || {};
@@ -1087,7 +1095,12 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     };
 
     const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
-    console.log('📤 Enviando a WhatsApp API:', { url, to: String(to), template: template?.name });
+    console.log('📤 Enviando a WhatsApp API:', { 
+      url, 
+      to: String(to), 
+      template: template?.name,
+      payload: JSON.stringify(payload, null, 2)
+    });
     
     const gRes = await fetch(url, {
       method: 'POST',
