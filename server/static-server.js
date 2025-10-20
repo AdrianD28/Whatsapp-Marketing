@@ -1078,6 +1078,8 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     };
 
     const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
+    console.log('📤 Enviando a WhatsApp API:', { url, to: String(to), template: template?.name });
+    
     const gRes = await fetch(url, {
       method: 'POST',
       headers: {
@@ -1089,6 +1091,12 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     const text = await gRes.text().catch(() => '');
     let graphJson;
     try { graphJson = JSON.parse(text); } catch { graphJson = { raw: text }; }
+    
+    console.log('📥 Respuesta de WhatsApp API:', {
+      status: gRes.status,
+      ok: gRes.ok,
+      response: graphJson
+    });
 
     // Insertar log
     let logId = null;
