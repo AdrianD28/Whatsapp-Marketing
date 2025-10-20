@@ -378,6 +378,10 @@ async function getUserFromAuth(req) {
 async function requireAuth(req, res, next) {
   const user = await getUserFromAuth(req);
   if (user) {
+    // Verificar si el usuario está suspendido
+    if (user.suspended) {
+      return res.status(403).json({ error: 'account_suspended', message: 'Tu cuenta ha sido suspendida. Contacta al administrador.' });
+    }
     req.userId = user.id;
     req.user = user;
     return next();
@@ -393,6 +397,10 @@ async function requireAuth(req, res, next) {
 async function requireUser(req, res, next) {
   const user = await getUserFromAuth(req);
   if (user) {
+    // Verificar si el usuario está suspendido
+    if (user.suspended) {
+      return res.status(403).json({ error: 'account_suspended', message: 'Tu cuenta ha sido suspendida. Contacta al administrador.' });
+    }
     req.userId = user.id;
     req.user = user;
     return next();
@@ -489,7 +497,8 @@ app.get('/api/auth/me', requireUser, async (req, res) => {
         email: user.email,
         name: user.name || null,
         role: user.role || 'user',
-        credits: user.credits || 0
+        credits: user.credits || 0,
+        suspended: user.suspended || false
       }
     });
   } catch (err) {
@@ -521,6 +530,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
       name: u.name || '',
       role: u.role || 'user',
       credits: u.credits || 0,
+      suspended: u.suspended || false,
       createdAt: u.createdAt,
       lastMessageAt: u.lastMessageAt || null
     }));
@@ -595,7 +605,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
 app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, role } = req.body;
+    const { name, role, suspended } = req.body;
     
     const db = await getDb();
     const user = await db.collection('users').findOne({ _id: new ObjectId(id) });
@@ -612,6 +622,7 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (role !== undefined) updates.role = role;
+    if (suspended !== undefined) updates.suspended = suspended;
     
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'no_fields_to_update' });
@@ -622,7 +633,7 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
       { $set: updates }
     );
     
-    console.log(`✅ User updated by admin: ${user.email}`);
+    console.log(`✅ User updated by admin: ${user.email}`, updates);
     
     return res.json({ success: true });
   } catch (err) {
@@ -1079,16 +1090,34 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
 
     // 💰 DESCONTAR CRÉDITO DESPUÉS DE ENVÍO EXITOSO
     try {
-      await db.collection('users').updateOne(
+      console.log('💰 Iniciando descuento de crédito...');
+      console.log('💰 User ID Object:', userIdObj);
+      console.log('💰 Log ID:', logId);
+      
+      const updateResult = await db.collection('users').updateOne(
         { _id: userIdObj },
         { $inc: { credits: -1 } }
       );
+      
+      console.log('💰 Resultado de actualización de créditos:', {
+        matchedCount: updateResult.matchedCount,
+        modifiedCount: updateResult.modifiedCount,
+        acknowledged: updateResult.acknowledged
+      });
+      
+      // Verificar créditos actuales del usuario
+      const updatedUser = await db.collection('users').findOne({ _id: userIdObj }, { projection: { credits: 1, email: 1 } });
+      console.log('💰 Usuario después del descuento:', updatedUser);
+      
       // Registrar en log que se descontó crédito
       await db.collection('send_logs').updateOne(
         { _id: logId },
         { $set: { creditDeducted: true } }
       );
+      
+      console.log('💰 ✅ Crédito descontado exitosamente');
     } catch (creditErr) {
+      console.error('💰 ❌ Error al descontar crédito:', creditErr);
       console.warn('credit deduction failed', creditErr);
     }
 

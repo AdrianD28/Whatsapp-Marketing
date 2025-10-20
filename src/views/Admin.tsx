@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Coins, Edit2, Trash2, Shield, User, Crown } from 'lucide-react';
+import { Users, Plus, Coins, Edit2, Trash2, Shield, User, Crown, Ban, Check } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
@@ -12,6 +12,7 @@ interface User {
   email: string;
   role: 'super_admin' | 'admin' | 'user';
   credits: number;
+  suspended?: boolean;
   createdAt: string;
   createdBy?: string;
 }
@@ -231,6 +232,33 @@ export function Admin() {
     }
   };
 
+  // Suspender/Reactivar usuario
+  const handleToggleSuspend = async (userId: string, userEmail: string, currentlySuspended: boolean) => {
+    const action = currentlySuspended ? 'reactivar' : 'suspender';
+    if (!confirm(`¿Deseas ${action} al usuario ${userEmail}?`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ suspended: !currentlySuspended }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || `Error al ${action} usuario`);
+      }
+
+      toast.success(`Usuario ${currentlySuspended ? 'reactivado' : 'suspendido'} exitosamente`);
+      loadUsers();
+    } catch (err: any) {
+      toast.error(err.message || `Error al ${action} usuario`);
+    }
+  };
+
   const getRoleIcon = (role: string) => {
     switch (role) {
       case 'super_admin':
@@ -339,6 +367,7 @@ export function Admin() {
               <tr className="border-b border-gray-700">
                 <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Usuario</th>
                 <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Rol</th>
+                <th className="text-center py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Estado</th>
                 <th className="text-right py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Créditos</th>
                 <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm hidden md:table-cell">Creado</th>
                 <th className="text-right py-2 sm:py-3 px-2 sm:px-4 text-gray-400 font-medium text-xs sm:text-sm">Acciones</th>
@@ -346,7 +375,7 @@ export function Admin() {
             </thead>
             <tbody>
               {users.map((user) => (
-                <tr key={user._id} className="border-b border-gray-700/50 hover:bg-gray-800/30">
+                <tr key={user._id} className={`border-b border-gray-700/50 hover:bg-gray-800/30 ${user.suspended ? 'opacity-60' : ''}`}>
                   <td className="py-2 sm:py-3 px-2 sm:px-4">
                     <div className="flex items-center gap-1.5 sm:gap-2">
                       {getRoleIcon(user.role)}
@@ -356,6 +385,15 @@ export function Admin() {
                   <td className="py-2 sm:py-3 px-2 sm:px-4">
                     <span className={`inline-flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-medium border ${getRoleBadge(user.role)}`}>
                       {user.role === 'super_admin' ? 'Super Admin' : user.role === 'admin' ? 'Admin' : 'Usuario'}
+                    </span>
+                  </td>
+                  <td className="py-2 sm:py-3 px-2 sm:px-4 text-center">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] sm:text-xs font-medium ${
+                      user.suspended 
+                        ? 'bg-red-900/30 text-red-400 border border-red-700/50' 
+                        : 'bg-green-900/30 text-green-400 border border-green-700/50'
+                    }`}>
+                      {user.suspended ? 'Suspendido' : 'Activo'}
                     </span>
                   </td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-right">
@@ -406,13 +444,31 @@ export function Admin() {
                       )}
                       
                       {user.role !== 'super_admin' && (
-                        <button
-                          onClick={() => handleDeleteUser(user._id, user.email)}
-                          className="p-1 sm:p-1.5 rounded hover:bg-red-900/30 text-red-400 transition-colors"
-                          title="Eliminar usuario"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleToggleSuspend(user._id, user.email, user.suspended || false)}
+                            className={`p-1 sm:p-1.5 rounded transition-colors ${
+                              user.suspended 
+                                ? 'hover:bg-green-900/30 text-green-400' 
+                                : 'hover:bg-orange-900/30 text-orange-400'
+                            }`}
+                            title={user.suspended ? 'Reactivar usuario' : 'Suspender usuario'}
+                          >
+                            {user.suspended ? (
+                              <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            ) : (
+                              <Ban className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                            )}
+                          </button>
+                          
+                          <button
+                            onClick={() => handleDeleteUser(user._id, user.email)}
+                            className="p-1 sm:p-1.5 rounded hover:bg-red-900/30 text-red-400 transition-colors"
+                            title="Eliminar usuario"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
