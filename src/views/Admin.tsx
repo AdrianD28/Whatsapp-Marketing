@@ -333,7 +333,10 @@ export function Admin() {
             <div>
               <p className="text-gray-400 text-sm">Créditos Totales</p>
               <p className="text-2xl font-bold text-white">
-                {users.reduce((acc, u) => acc + (u.credits || 0), 0).toLocaleString()}
+                {users
+                  .filter(u => u.role !== 'admin' && u.role !== 'super_admin')
+                  .reduce((acc, u) => acc + (u.credits || 0), 0)
+                  .toLocaleString()}
               </p>
             </div>
             <Coins className="w-8 h-8 text-green-400" />
@@ -402,7 +405,7 @@ export function Admin() {
                       user.credits < 100 ? 'text-yellow-400' : 
                       'text-green-400'
                     }`}>
-                      {user.credits > 999 ? `${(user.credits/1000).toFixed(1)}k` : user.credits.toLocaleString()}
+                      {user.credits.toLocaleString()}
                     </span>
                   </td>
                   <td className="py-2 sm:py-3 px-2 sm:px-4 text-gray-400 text-xs sm:text-sm hidden md:table-cell">
