@@ -245,6 +245,19 @@ app.get('/webhook/log', (req, res) => {
 });
 
 // --- Webhook Proxy para Chatwoot ---
+// Verificación GET (Meta lo usa para verificar el webhook)
+app.get('/webhook/whatsapp-proxy', (req, res) => {
+  const verifyToken = process.env.WEBHOOK_VERIFY_TOKEN || 'changeme';
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === verifyToken) {
+    console.log('✅ Webhook proxy verificado exitosamente');
+    return res.status(200).send(challenge);
+  }
+  return res.status(403).send('Forbidden');
+});
+
 // Este endpoint reenvía webhooks a Chatwoot para que maneje conversaciones
 app.post('/webhook/whatsapp-proxy', async (req, res) => {
   const body = req.body || {};
