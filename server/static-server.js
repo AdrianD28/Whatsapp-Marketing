@@ -2381,14 +2381,10 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
     // Aplicar paginación
     const campaigns = allCampaigns.slice(skip, skip + limit);
     
-    // Para cada campaña, contar estados desde message_events
-    // IMPORTANTE: Usamos statusHistory para contar delivered correctamente
-    // Un mensaje que fue delivered Y luego read debe contar en AMBOS
     for (const c of campaigns) {
       const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
       
-      // Contar estados de mensajes de forma robusta usando agregación
-      // Cada mensaje cuenta SOLO en su estado más avanzado: failed > read > delivered > sent
+
       try {
         const agg = await db.collection('message_events').aggregate([
           { $match: match },
@@ -2399,20 +2395,18 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
               hasDelivered: { $in: ['delivered', { $ifNull: ['$statusHistory', []] }] }
           } },
           { $addFields: {
-              // Clasificar mensaje en UNA sola categoría (prioridad: failed > read > delivered)
-              finalStatus: {
-                $cond: ['$hasFailed', 'failed',
-                  { $cond: ['$hasRead', 'read',
-                    { $cond: ['$hasDelivered', 'delivered', 'other'] }
-                  ] }
-                ]
-              }
+              // Un mensaje está "entregado" si llegó a delivered O read
+              isDelivered: { $or: ['$hasDelivered', '$hasRead'] },
+              // Un mensaje está "leído" si llegó a read
+              isRead: '$hasRead',
+              // Un mensaje tiene "error" SOLO si falló Y NUNCA se entregó/leyó
+              isFailed: { $and: ['$hasFailed', { $not: { $or: ['$hasDelivered', '$hasRead'] } }] }
           } },
           { $group: {
               _id: null,
-              delivered: { $sum: { $cond: [{ $eq: ['$finalStatus', 'delivered'] }, 1, 0] } },
-              read: { $sum: { $cond: [{ $eq: ['$finalStatus', 'read'] }, 1, 0] } },
-              failed: { $sum: { $cond: [{ $eq: ['$finalStatus', 'failed'] }, 1, 0] } },
+              delivered: { $sum: { $cond: ['$isDelivered', 1, 0] } },
+              read: { $sum: { $cond: ['$isRead', 1, 0] } },
+              failed: { $sum: { $cond: ['$isFailed', 1, 0] } },
               total: { $sum: 1 }
           } }
         ]).toArray();
