@@ -50,23 +50,23 @@ export function Statistics() {
   const summary = useMemo(() => {
     return campaigns.map(c => {
       const counts = (c as any).counts || {};
-      // Total es la suma de todos los estados en message_events
-      const total = Object.values(counts).reduce((a: any, b: any) => a + (Number(b) || 0), 0) as number;
+      
+      // IMPORTANTE: usar counts.total directamente (número de mensajes únicos)
+      // NO sumar delivered+read+failed porque un mensaje puede tener múltiples estados
+      const totalMessages = counts['total'] || 0;
       
       // Si no hay eventos aún, usar el total de la sesión si está disponible
-      const recipients = total > 0 ? total : ((c as any).total || 0);
+      const recipients = totalMessages > 0 ? totalMessages : ((c as any).total || 0);
       
-      // Estados específicos
-      // IMPORTANTE: Los entregados deben incluir SOLO los delivered (no los leídos)
-      // Los leídos son una métrica separada
+      // Estados específicos desde el backend
       const delivered = counts['delivered'] || 0;
       const read = counts['read'] || 0;
-      const failed = (counts['failed'] || 0) + (counts['undelivered'] || 0);
+      const failed = counts['failed'] || 0;
       
       // Tasas de entrega y lectura
-      // La tasa de entrega es: (delivered + read) / total
+      // La tasa de entrega es: delivered / total (sin incluir read, porque delivered ya cuenta los que luego fueron read)
       // La tasa de lectura es: read / total
-      const deliveryRate = recipients > 0 ? Math.round(((delivered + read) / recipients) * 100) : 0;
+      const deliveryRate = recipients > 0 ? Math.round((delivered / recipients) * 100) : 0;
       const readRate = recipients > 0 ? Math.round((read / recipients) * 100) : 0;
       
       return { 
