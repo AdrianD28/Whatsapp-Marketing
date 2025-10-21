@@ -219,7 +219,11 @@ app.post('/webhook/whatsapp', async (req, res) => {
                   upserted: updateResult.upsertedId ? 'SÍ' : 'NO'
                 });
               } else {
-                console.log(`⚠️ No se encontró userId en send_log para messageId: ${messageId}`);
+                // Silencioso: probablemente es un mensaje entrante del usuario o de otra conversación
+                // Solo logear si es un estado de error real
+                if (s.status === 'failed' || s.status === 'undelivered') {
+                  console.warn(`⚠️ No se encontró send_log para messageId con error: ${messageId}`);
+                }
               }
             }
           } catch (perr) {
@@ -238,6 +242,93 @@ app.post('/webhook/whatsapp', async (req, res) => {
 });
 app.get('/webhook/log', (req, res) => {
   res.json(webhookLog.slice(-100));
+});
+
+// --- Webhook Proxy para Chatwoot ---
+// Este endpoint reenvía webhooks a Chatwoot para que maneje conversaciones
+app.post('/webhook/whatsapp-proxy', async (req, res) => {
+  const body = req.body || {};
+  
+  console.log('🔄 PROXY: Webhook recibido, procesando...');
+  
+  // Responder inmediatamente a Meta (200 OK)
+  res.sendStatus(200);
+  
+  // Procesar en paralelo: nuestra lógica + reenviar a Chatwoot
+  try {
+    const chatwootUrl = process.env.CHATWOOT_WEBHOOK_URL;
+    
+    // 1. Procesar nuestra lógica (solo statuses para estadísticas)
+    const entries = body.entry || [];
+    for (const e of entries) {
+      const changes = e.changes || [];
+      for (const c of changes) {
+        const v = c.value || {};
+        const statuses = v.statuses || [];
+        
+        // Solo procesar statuses (no mensajes entrantes)
+        if (statuses.length > 0) {
+          console.log(`📊 Procesando ${statuses.length} status updates en nuestra app`);
+          
+          const db = await getDb();
+          for (const s of statuses) {
+            try {
+              const messageId = s.id;
+              if (messageId) {
+                const logDoc = await db.collection('send_logs').findOne({ messageId });
+                
+                if (logDoc?.userId) {
+                  const userIdObj = logDoc.userId;
+                  const update = {
+                    status: s.status,
+                    updatedAt: new Date().toISOString(),
+                    lastRecipient: s.recipient_id,
+                    error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
+                  };
+                  
+                  await db.collection('message_events').updateOne(
+                    { userId: userIdObj, messageId },
+                    { 
+                      $set: update, 
+                      $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null },
+                      $addToSet: { statusHistory: s.status }
+                    },
+                    { upsert: true }
+                  );
+                  
+                  console.log(`✅ Status ${s.status} actualizado para ${messageId}`);
+                }
+              }
+            } catch (err) {
+              console.error('Error procesando status:', err);
+            }
+          }
+        }
+      }
+    }
+    
+    // 2. Reenviar TODO el webhook a Chatwoot (si está configurado)
+    if (chatwootUrl) {
+      console.log(`📤 Reenviando webhook a Chatwoot: ${chatwootUrl}`);
+      
+      const chatwootResponse = await fetch(chatwootUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      
+      if (chatwootResponse.ok) {
+        console.log('✅ Webhook enviado exitosamente a Chatwoot');
+      } else {
+        console.error(`❌ Error enviando a Chatwoot: ${chatwootResponse.status}`);
+      }
+    } else {
+      console.log('⚠️ CHATWOOT_WEBHOOK_URL no configurado, saltando reenvío');
+    }
+    
+  } catch (err) {
+    console.error('Error en webhook proxy:', err);
+  }
 });
 
 // Serve frontend `dist` if it exists (SPA fallback to index.html)
@@ -2284,21 +2375,31 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
       const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
       
       // Contar estados de mensajes de forma robusta usando agregación
-      // Queremos contar, por mensaje (messageId), si alguna vez tuvo 'delivered' o 'read'
+      // Cada mensaje cuenta SOLO en su estado más avanzado: failed > read > delivered > sent
       try {
         const agg = await db.collection('message_events').aggregate([
           { $match: match },
           { $project: { messageId: 1, statusHistory: 1 } },
           { $addFields: {
-              hasDelivered: { $in: ['delivered', { $ifNull: ['$statusHistory', []] }] },
+              hasFailed: { $or: [ { $in: ['failed', { $ifNull: ['$statusHistory', []] }] }, { $in: ['undelivered', { $ifNull: ['$statusHistory', []] }] } ] },
               hasRead: { $in: ['read', { $ifNull: ['$statusHistory', []] }] },
-              hasFailed: { $or: [ { $in: ['failed', { $ifNull: ['$statusHistory', []] }] }, { $in: ['undelivered', { $ifNull: ['$statusHistory', []] }] } ] }
+              hasDelivered: { $in: ['delivered', { $ifNull: ['$statusHistory', []] }] }
+          } },
+          { $addFields: {
+              // Clasificar mensaje en UNA sola categoría (prioridad: failed > read > delivered)
+              finalStatus: {
+                $cond: ['$hasFailed', 'failed',
+                  { $cond: ['$hasRead', 'read',
+                    { $cond: ['$hasDelivered', 'delivered', 'other'] }
+                  ] }
+                ]
+              }
           } },
           { $group: {
               _id: null,
-              delivered: { $sum: { $cond: ['$hasDelivered', 1, 0] } },
-              read: { $sum: { $cond: ['$hasRead', 1, 0] } },
-              failed: { $sum: { $cond: ['$hasFailed', 1, 0] } },
+              delivered: { $sum: { $cond: [{ $eq: ['$finalStatus', 'delivered'] }, 1, 0] } },
+              read: { $sum: { $cond: [{ $eq: ['$finalStatus', 'read'] }, 1, 0] } },
+              failed: { $sum: { $cond: [{ $eq: ['$finalStatus', 'failed'] }, 1, 0] } },
               total: { $sum: 1 }
           } }
         ]).toArray();
