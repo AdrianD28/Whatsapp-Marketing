@@ -80,9 +80,16 @@ export function useApi(credentials: ApiCredentials | null) {
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
       let authExpired = false;
+      let errorDetail = null;
       try {
         const json = await response.json();
         const e = json.error || {};
+        
+        // Si el error viene del servidor con detail, guardarlo
+        if (json.detail) {
+          errorDetail = json.detail;
+        }
+        
         const parts = [e.message];
         if (e.error_user_title || e.error_user_msg) {
           parts.push(`${e.error_user_title ?? 'Error'}: ${e.error_user_msg ?? ''}`.trim());
@@ -100,6 +107,7 @@ export function useApi(credentials: ApiCredentials | null) {
       }
       const err: any = new Error(message);
       if (authExpired) err.authExpired = true;
+      if (errorDetail) err.detail = errorDetail;
       throw err;
     }
 
@@ -312,15 +320,37 @@ export function useApi(credentials: ApiCredentials | null) {
       console.debug('[useApi] createTemplate response', result);
       toast.success('Plantilla creada exitosamente');
       return result;
-    } catch (error) {
+    } catch (error: any) {
       const raw = error instanceof Error ? error.message : String(error ?? 'Error desconocido');
       const normalized = raw || 'Error desconocido';
+      
+      // Extraer información detallada del error si viene del servidor
+      let errorDetail = null;
+      try {
+        // Si el error es del servidor /create-template
+        if (error.message && error.message.includes('Servidor respondió')) {
+          const match = error.message.match(/(\d+): (.+)/);
+          if (match) {
+            try {
+              errorDetail = JSON.parse(match[2]);
+            } catch {}
+          }
+        }
+        // Si el error ya tiene detail (makeRequest lo agregó)
+        if (error.detail) {
+          errorDetail = error.detail;
+        }
+      } catch {}
+      
       if (/2388023/.test(normalized) || /Se está eliminando el idioma/i.test(normalized) || /Spanish \(SPA\)/i.test(normalized)) {
         toast.error('Meta bloquea re-crear el mismo idioma de una plantilla en eliminación. Usa otro nombre (p. ej. _v2) u otro locale (es_MX/es_LA) o espera 4 semanas.');
       } else {
-        toast.error(`Error al crear plantilla: ${normalized}`);
+        // No mostramos toast aquí, dejamos que la capa superior maneje el error
+        console.error('[useApi] createTemplate error:', error, errorDetail);
       }
-      throw error;
+      
+      // Lanzar error con detalles para que la UI pueda mostrarlo
+      throw errorDetail ? { ...error, detail: errorDetail } : error;
     } finally {
       setLoading(false);
     }

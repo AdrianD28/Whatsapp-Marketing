@@ -298,7 +298,36 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-sm text-gray-300 mb-2">Tipo de botón</label>
-                        <select {...register(`buttons.${idx}.type` as const)} className="w-full rounded border-gray-600 bg-gray-700 text-white p-2">
+                        <select 
+                          {...register(`buttons.${idx}.type` as const)}
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            const current = watch('buttons') || [];
+                            
+                            // Validar que no se mezclen tipos
+                            const otherButtons = current.filter((_: any, i: number) => i !== idx);
+                            const hasQuickReply = otherButtons.some((b: any) => b.type === 'QUICK_REPLY');
+                            const hasUrlOrPhone = otherButtons.some((b: any) => 
+                              b.type === 'URL' || b.type === 'PHONE_NUMBER'
+                            );
+                            
+                            if (newType === 'QUICK_REPLY' && hasUrlOrPhone) {
+                              alert('❌ No puedes mezclar botones de respuesta rápida con botones de enlace o llamada.');
+                              return;
+                            }
+                            
+                            if ((newType === 'URL' || newType === 'PHONE_NUMBER') && hasQuickReply) {
+                              alert('❌ No puedes mezclar botones de enlace o llamada con botones de respuesta rápida.');
+                              return;
+                            }
+                            
+                            // Si pasa validación, actualizar
+                            const updated = [...current];
+                            updated[idx] = { ...updated[idx], type: newType as any };
+                            setValue('buttons', updated as any);
+                          }}
+                          className="w-full rounded border-gray-600 bg-gray-700 text-white p-2"
+                        >
                           <option value="QUICK_REPLY">Respuesta Rápida</option>
                           <option value="URL">URL</option>
                           <option value="PHONE_NUMBER">Teléfono</option>
@@ -383,14 +412,34 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                 onClick={() => {
                   const current = watch('buttons') || [];
                   
+                  // 🚨 VALIDACIÓN: No se pueden mezclar tipos de botones
+                  const hasQuickReply = current.some((b: any) => b.type === 'QUICK_REPLY');
+                  const hasUrlOrPhone = current.some((b: any) => 
+                    b.type === 'URL' || b.type === 'PHONE_NUMBER'
+                  );
+                  
+                  if (hasQuickReply && hasUrlOrPhone) {
+                    alert('❌ No puedes mezclar botones de respuesta rápida con botones de enlace o llamada.\n\nElige uno:\n• Solo respuestas rápidas (máx 3)\n• Solo enlaces/llamadas (máx 2)');
+                    return;
+                  }
+                  
                   // Validar límites según tipo
                   const urlOrPhoneButtons = current.filter((b: any) => 
                     b.type === 'URL' || b.type === 'PHONE_NUMBER'
                   );
+                  const quickReplyButtons = current.filter((b: any) => 
+                    b.type === 'QUICK_REPLY'
+                  );
                   
-                  // Si ya hay 2 botones de URL/Teléfono y el último añadido fue de ese tipo
+                  // Si ya hay 2 botones de URL/Teléfono
                   if (urlOrPhoneButtons.length >= 2) {
                     alert('Solo puedes tener máximo 2 botones de URL o Llamada');
+                    return;
+                  }
+                  
+                  // Si ya hay 3 botones de respuesta rápida
+                  if (quickReplyButtons.length >= 3) {
+                    alert('Solo puedes tener máximo 3 botones de respuesta rápida');
                     return;
                   }
                   

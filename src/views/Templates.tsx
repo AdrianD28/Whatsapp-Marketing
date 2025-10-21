@@ -38,10 +38,30 @@ export function Templates() {
       const latest = await fetchTemplates();
       setTemplates(latest);
       setShowForm(false);
-    } catch (error) {
+    } catch (error: any) {
+      // Extraer mensaje de error detallado de la API
+      let errorMessage = 'Error desconocido';
+      let errorTitle = 'Error al crear plantilla';
+      
+      if (error?.detail?.error) {
+        const apiError = error.detail.error;
+        errorTitle = apiError.error_user_title || 'Error de validación';
+        errorMessage = apiError.error_user_msg || apiError.message || 'Error en la API de WhatsApp';
+        
+        // Agregar sugerencias según el tipo de error
+        if (apiError.error_subcode === 2388158) {
+          errorMessage += '\n\n💡 Sugerencia: No puedes mezclar botones de respuesta rápida con botones de URL. Usa solo un tipo de botón:\n• Máximo 3 botones de respuesta rápida\n• O máximo 2 botones con enlaces';
+        }
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      
+      // Mostrar modal con el error
+      alert(`❌ ${errorTitle}\n\n${errorMessage}`);
+      
       addActivity({
-        title: 'Error al crear plantilla',
-        description: error instanceof Error ? error.message : 'Error desconocido',
+        title: errorTitle,
+        description: errorMessage,
         type: 'error',
       });
     }
