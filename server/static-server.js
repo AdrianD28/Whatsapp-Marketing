@@ -2106,6 +2106,48 @@ app.get('/api/wa/quality-history', requireUser, async (req, res) => {
   }
 });
 
+// 🆕 NUEVO: Consultar estado de mensaje específico por messageId
+app.get('/api/wa/message-status/:messageId', requireUser, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const db = await getDb();
+    const userIdObj = new ObjectId(req.userId);
+    
+    // Buscar en message_events
+    const event = await db.collection('message_events').findOne({ 
+      userId: userIdObj, 
+      messageId 
+    });
+    
+    if (!event) {
+      return res.status(404).json({ error: 'message_not_found' });
+    }
+    
+    // Buscar en send_logs para más detalles
+    const log = await db.collection('send_logs').findOne({ messageId });
+    
+    return res.json({
+      messageId,
+      currentStatus: event.status,
+      statusHistory: event.statusHistory || [],
+      recipient: event.lastRecipient,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
+      error: event.error || null,
+      sendLog: log ? {
+        to: log.to,
+        templateName: log.templateName,
+        graphStatus: log.graphStatus,
+        success: log.success,
+        time: log.time
+      } : null
+    });
+  } catch (err) {
+    console.error('/api/wa/message-status error', err);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // Diagnostics: Verify WA token + assets
 app.get('/diag/wa', async (req, res) => {
   try {
@@ -2241,36 +2283,42 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
     for (const c of campaigns) {
       const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
       
-      // Contar mensajes que ALGUNA VEZ fueron delivered (incluso si ahora están read)
-      const deliveredCount = await db.collection('message_events').countDocuments({
-        ...match,
-        statusHistory: 'delivered'
-      });
-      
-      // Contar mensajes que ALGUNA VEZ fueron read
-      const readCount = await db.collection('message_events').countDocuments({
-        ...match,
-        statusHistory: 'read'
-      });
-      
-      // Contar mensajes con error
-      const failedCount = await db.collection('message_events').countDocuments({
-        ...match,
-        $or: [
-          { statusHistory: 'failed' },
-          { statusHistory: 'undelivered' }
-        ]
-      });
-      
-      // Total de mensajes en esta campaña
-      const totalCount = await db.collection('message_events').countDocuments(match);
-      
-      c['counts'] = {
-        delivered: deliveredCount,
-        read: readCount,
-        failed: failedCount,
-        total: totalCount
-      };
+      // Contar estados de mensajes de forma robusta usando agregación
+      // Queremos contar, por mensaje (messageId), si alguna vez tuvo 'delivered' o 'read'
+      try {
+        const agg = await db.collection('message_events').aggregate([
+          { $match: match },
+          { $project: { messageId: 1, statusHistory: 1 } },
+          { $addFields: {
+              hasDelivered: { $in: ['delivered', { $ifNull: ['$statusHistory', []] }] },
+              hasRead: { $in: ['read', { $ifNull: ['$statusHistory', []] }] },
+              hasFailed: { $or: [ { $in: ['failed', { $ifNull: ['$statusHistory', []] }] }, { $in: ['undelivered', { $ifNull: ['$statusHistory', []] }] } ] }
+          } },
+          { $group: {
+              _id: null,
+              delivered: { $sum: { $cond: ['$hasDelivered', 1, 0] } },
+              read: { $sum: { $cond: ['$hasRead', 1, 0] } },
+              failed: { $sum: { $cond: ['$hasFailed', 1, 0] } },
+              total: { $sum: 1 }
+          } }
+        ]).toArray();
+
+        const result = (agg && agg[0]) ? agg[0] : { delivered: 0, read: 0, failed: 0, total: 0 };
+        c['counts'] = {
+          delivered: result.delivered || 0,
+          read: result.read || 0,
+          failed: result.failed || 0,
+          total: result.total || 0
+        };
+      } catch (aggErr) {
+        console.error('/api/reports/campaigns aggregation error', aggErr);
+        // Fallback a conteos simples si la agregación falla
+        const deliveredCount = await db.collection('message_events').countDocuments({ ...match, statusHistory: 'delivered' });
+        const readCount = await db.collection('message_events').countDocuments({ ...match, statusHistory: 'read' });
+        const failedCount = await db.collection('message_events').countDocuments({ ...match, $or: [{ statusHistory: 'failed' }, { statusHistory: 'undelivered' }] });
+        const totalCount = await db.collection('message_events').countDocuments(match);
+        c['counts'] = { delivered: deliveredCount, read: readCount, failed: failedCount, total: totalCount };
+      }
     }
     
     return res.json({ 
