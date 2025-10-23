@@ -110,10 +110,11 @@ export function Statistics() {
         const recipient = e.lastRecipient || '';
         const messageId = e.messageId || '';
         const status = e.status ? e.status.toUpperCase() : '';
-        // Convertir timestamp con zona horaria correcta
-        const timestamp = e.updatedAt ? (() => {
-          const d = new Date(e.updatedAt);
-          // Asegurar que la fecha se interprete en la zona horaria de Colombia
+        
+        // Función helper para formatear fecha en zona horaria de Colombia
+        const formatDate = (dateString: string) => {
+          if (!dateString) return '';
+          const d = new Date(dateString);
           const formatter = new Intl.DateTimeFormat('es-CO', {
             timeZone: 'America/Bogota',
             year: 'numeric',
@@ -125,24 +126,16 @@ export function Statistics() {
             hour12: false
           });
           return formatter.format(d);
-        })() : '';
+        };
         
-        // Determinar qué columna de fecha usar según el estado
-        let fechaEnvio = timestamp;
-        let fechaConfirmado = '';
-        let fechaEntrega = '';
-        let fechaLeido = '';
+        // Extraer timestamps específicos de cada estado desde statusHistory
+        // statusHistory contiene objetos como: { status: 'sent', timestamp: '2025-10-21T...' }
+        const statusTimestamps = e.statusTimestamps || {};
         
-        if (status === 'SENT') {
-          fechaEnvio = timestamp;
-        } else if (status === 'DELIVERED') {
-          fechaConfirmado = timestamp;
-          fechaEntrega = timestamp;
-        } else if (status === 'READ') {
-          fechaConfirmado = timestamp;
-          fechaEntrega = timestamp;
-          fechaLeido = timestamp;
-        }
+        const fechaEnvio = formatDate(e.createdAt || statusTimestamps.sent || '');
+        const fechaConfirmado = formatDate(statusTimestamps.sent || '');
+        const fechaEntrega = formatDate(statusTimestamps.delivered || '');
+        const fechaLeido = formatDate(statusTimestamps.read || '');
 
         excelData.push([
           recipient,

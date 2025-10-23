@@ -195,6 +195,9 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 const userIdObj = logDoc.userId;
                 console.log(`👤 UserId del log: ${userIdObj}`);
                 
+                // Timestamp del webhook (viene en s.timestamp de WhatsApp)
+                const statusTimestamp = s.timestamp ? new Date(parseInt(s.timestamp) * 1000).toISOString() : new Date().toISOString();
+                
                 const update = {
                   status: s.status,
                   updatedAt: new Date().toISOString(),
@@ -202,22 +205,22 @@ app.post('/webhook/whatsapp', async (req, res) => {
                   error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
                 };
                 
+                // Crear objeto para guardar timestamp específico de este estado
+                const timestampUpdate = {};
+                timestampUpdate[`statusTimestamps.${s.status}`] = statusTimestamp;
+                
                 // Agregar el estado al historial de estados
                 const updateResult = await db.collection('message_events').updateOne(
                   { userId: userIdObj, messageId },
                   { 
-                    $set: update, 
+                    $set: { ...update, ...timestampUpdate }, 
                     $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null },
                     $addToSet: { statusHistory: s.status } // Rastrea todos los estados por los que pasa
                   },
                   { upsert: true }
                 );
                 
-                console.log(`✅ Message event actualizado:`, {
-                  matched: updateResult.matchedCount,
-                  modified: updateResult.modifiedCount,
-                  upserted: updateResult.upsertedId ? 'SÍ' : 'NO'
-                });
+                console.log(`✅ Status ${s.status} actualizado para ${messageId} en ${statusTimestamp}`);
               } else {
                 // Silencioso: probablemente es un mensaje entrante del usuario o de otra conversación
                 // Solo logear si es un estado de error real
@@ -292,6 +295,10 @@ app.post('/webhook/whatsapp-proxy', async (req, res) => {
                 
                 if (logDoc?.userId) {
                   const userIdObj = logDoc.userId;
+                  
+                  // Timestamp del webhook (viene en s.timestamp de WhatsApp)
+                  const statusTimestamp = s.timestamp ? new Date(parseInt(s.timestamp) * 1000).toISOString() : new Date().toISOString();
+                  
                   const update = {
                     status: s.status,
                     updatedAt: new Date().toISOString(),
@@ -299,10 +306,14 @@ app.post('/webhook/whatsapp-proxy', async (req, res) => {
                     error: Array.isArray(s.errors) && s.errors.length ? s.errors[0] : undefined,
                   };
                   
+                  // Crear objeto para guardar timestamp específico de este estado
+                  const timestampUpdate = {};
+                  timestampUpdate[`statusTimestamps.${s.status}`] = statusTimestamp;
+                  
                   await db.collection('message_events').updateOne(
                     { userId: userIdObj, messageId },
                     { 
-                      $set: update, 
+                      $set: { ...update, ...timestampUpdate }, 
                       $setOnInsert: { createdAt: new Date().toISOString(), batchId: logDoc.batchId || null },
                       $addToSet: { statusHistory: s.status }
                     },
