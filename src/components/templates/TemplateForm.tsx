@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { motion } from 'framer-motion';
-import { FileText, Image, Type, MessageSquare, Film, File as FileIcon, MapPin, Plus, Trash2, Link as LinkIcon, Phone } from 'lucide-react';
+import { FileText, Image, Type, MessageSquare, Film, File as FileIcon, MapPin, Plus, Trash2, Link as LinkIcon, Phone, Bold, Italic, Smile } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { useAppContext } from '../../context/AppContext';
 import { HelpTooltip } from '../ui/HelpTooltip';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 
 interface TemplateFormData {
   name: string;
@@ -16,12 +17,10 @@ interface TemplateFormData {
   headerValue: string;
   body: string;
   footer: string;
-  ttl?: number;
   buttons: Array<{
     type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER';
     text?: string;
     url?: string;
-    urlExample?: string;
     phone_number?: string;
   }>;
 }
@@ -35,6 +34,8 @@ interface TemplateFormProps {
 export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFormProps) {
   const [preview, setPreview] = useState('');
   const [imageUrl, setImageUrl] = useState<string>('');
+  const [bodyCharCount, setBodyCharCount] = useState(0);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const { } = useAppContext();
   const { register, handleSubmit, watch, formState: { errors }, setValue } = useForm<TemplateFormData>({
     defaultValues: {
@@ -47,6 +48,23 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
   // Manejamos la lista de botones con watch/setValue sin useFieldArray
 
   const watchedValues = watch();
+  
+  // Funciones para formatear texto
+  const insertFormatting = (format: 'bold' | 'italic' | 'strikethrough') => {
+    const bodyValue = watchedValues.body || '';
+    const wrapper = format === 'bold' ? '*' : format === 'italic' ? '_' : '~';
+    const newValue = bodyValue + `${wrapper}texto${wrapper}`;
+    setValue('body', newValue);
+    setBodyCharCount(newValue.length);
+  };
+  
+  const insertEmoji = (emojiData: EmojiClickData) => {
+    const bodyValue = watchedValues.body || '';
+    const newValue = bodyValue + emojiData.emoji;
+    setValue('body', newValue);
+    setBodyCharCount(newValue.length);
+    setShowEmojiPicker(false);
+  };
 
   React.useEffect(() => {
     const { headerType, headerValue, body, footer } = watchedValues as any;
@@ -129,9 +147,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
       const btns = buttons.map(b => {
         if (b.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', text: b.text || 'OK' };
         if (b.type === 'URL') {
-          const hasVar = /\{\{[^}]+\}\}/.test(b.url || '');
           const base: any = { type: 'URL', text: b.text || 'Abrir', url: b.url || 'https://example.com' };
-          if (hasVar && b.urlExample) base.example = [b.urlExample];
           return base;
         }
         if (b.type === 'PHONE_NUMBER') return { type: 'PHONE_NUMBER', text: b.text || 'Llamar', phone_number: b.phone_number || '' };
@@ -139,9 +155,6 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
       }).filter(Boolean);
       if (btns.length) templateData.components.push({ type: 'BUTTONS', buttons: btns });
     }
-
-    // TTL opcional
-    if (data.ttl && Number.isFinite(data.ttl)) templateData.message_send_ttl_seconds = Number(data.ttl);
 
     if (['IMAGE','VIDEO','DOCUMENT'].includes(data.headerType)) {
       if (data.headerValue) {
@@ -264,13 +277,75 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
 
           <div>
             <label className="block text-sm font-medium text-gray-200 mb-2">Cuerpo del Mensaje</label>
+            
+            {/* Barra de herramientas de formato */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => insertFormatting('bold')}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold"
+                title="Negrita"
+              >
+                *B*
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting('italic')}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm italic"
+                title="Cursiva"
+              >
+                _I_
+              </button>
+              <button
+                type="button"
+                onClick={() => insertFormatting('strikethrough')}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm line-through"
+                title="Tachado"
+              >
+                ~T~
+              </button>
+              
+              {/* Selector de emojis de WhatsApp */}
+              <div className="relative ml-4">
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-lg"
+                  title="Insertar emoji"
+                >
+                  😊
+                </button>
+                {showEmojiPicker && (
+                  <div className="absolute top-full mt-2 z-50">
+                    <EmojiPicker onEmojiClick={insertEmoji} />
+                  </div>
+                )}
+              </div>
+            </div>
+            
             <textarea
-              {...register('body', { required: 'El cuerpo del mensaje es obligatorio' })}
-              rows={4}
+              {...register('body', { 
+                required: 'El cuerpo del mensaje es obligatorio',
+                maxLength: { value: 1024, message: 'El cuerpo no puede exceder 1024 caracteres' }
+              })}
+              rows={6}
               placeholder="Escribe tu mensaje aquí... Usa {{1}}, {{2}} para variables"
               className="w-full rounded-lg border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:border-green-500 focus:ring-green-500"
+              onChange={(e) => setBodyCharCount(e.target.value.length)}
             />
-            {errors.body && <p className="text-sm text-red-400 mt-1">{errors.body.message}</p>}
+            
+            <div className="flex justify-between items-center mt-1">
+              <div>
+                {errors.body && <p className="text-sm text-red-400">{errors.body.message}</p>}
+              </div>
+              <p className={`text-sm ${bodyCharCount > 1024 ? 'text-red-400' : bodyCharCount > 900 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                {bodyCharCount}/1024 caracteres
+              </p>
+            </div>
+            
+            <p className="text-xs text-gray-400 mt-1">
+              Formato: *negrita*, _cursiva_, ~tachado~
+            </p>
           </div>
 
           <Input
@@ -279,13 +354,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
             {...register('footer')}
           />
 
-          <Input
-            label="TTL del mensaje (segundos, opcional)"
-            placeholder="p. ej. 120"
-            {...register('ttl')}
-          />
-
-            <div className="pt-2">
+          <div className="pt-2">
             <label className="block text-sm font-medium text-gray-200 mb-2">Botones</label>
             <div className="text-xs text-gray-400 mb-3">
               Máximo 3 botones de respuesta rápida o 2 botones de URL/Llamada
@@ -338,11 +407,17 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                         <div className="flex items-center gap-2">
                           <MessageSquare className="w-4 h-4 text-gray-400" />
                           <input 
-                            {...register(`buttons.${idx}.text` as const)} 
+                            {...register(`buttons.${idx}.text` as const, {
+                              maxLength: { value: 25, message: 'Máximo 25 caracteres' }
+                            })} 
                             placeholder="Texto del botón"
+                            maxLength={25}
                             className="flex-1 rounded border-gray-600 bg-gray-700 text-white p-2"
                           />
                         </div>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {(watch(`buttons.${idx}.text` as const) || '').length}/25 caracteres
+                        </p>
                       </div>
                     </div>
                     
@@ -352,10 +427,10 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                         <div>
                           <div className="flex items-center gap-2 mb-2">
                             <label className="block text-sm text-gray-300">URL del botón</label>
-                            <HelpTooltip title="URL con variables" tooltip="Cómo completar el ejemplo">
+                            <HelpTooltip title="URL con variables" tooltip="Puedes usar variables">
                               <p>
-                                Si tu URL de botón incluye variables como <code>{"{{1}}"}</code>, Meta exige un ejemplo de valor para aprobación. 
-                                Completa "Ejemplo" con un valor representativo. En envío real, se reemplazará por los parámetros.
+                                Puedes usar variables como <code>{"{{1}}"}</code> en tu URL. 
+                                En el envío real, se reemplazarán por los parámetros que definas.
                               </p>
                             </HelpTooltip>
                           </div>
@@ -367,14 +442,6 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                               className="flex-1 rounded border-gray-600 bg-gray-700 text-white p-2"
                             />
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm text-gray-300 mb-2">Ejemplo (si URL tiene {"{{}}"})</label>
-                          <input 
-                            {...register(`buttons.${idx}.urlExample` as const)} 
-                            placeholder="valor-ejemplo"
-                            className="w-full rounded border-gray-600 bg-gray-700 text-white p-2"
-                          />
                         </div>
                       </div>
                     )}

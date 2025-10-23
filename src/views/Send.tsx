@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Send as SendIcon, Play, Pause, Users, Settings, Eye, Activity } from 'lucide-react';
 import { useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
@@ -28,6 +29,7 @@ interface SendProps {
 }
 
 export function Send({ onMessageSent }: SendProps) {
+  const navigate = useNavigate();
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
@@ -234,8 +236,11 @@ export function Send({ onMessageSent }: SendProps) {
           setTimeout(() => onMessageSent(), 2000);
         }
 
-        // Abrir monitor automáticamente
-        setShowMonitor(true);
+        // ✅ Redirigir al Dashboard después de crear la campaña
+        setTimeout(() => {
+          navigate('/');
+        }, 2500);
+        
         return;
 
       } catch (err: any) {
@@ -563,7 +568,6 @@ export function Send({ onMessageSent }: SendProps) {
   try {
     if (selectedTemplate) {
       const bodyComp = selectedTemplate.components.find((c: any) => c.type === 'BODY') as any;
-      const humanName = `${selectedTemplate.name} - ${new Date().toLocaleString()}`;
       addSendSession({
         templateName: selectedTemplate.name,
         templateCategory: selectedTemplate.category,
@@ -572,7 +576,6 @@ export function Send({ onMessageSent }: SendProps) {
         success: successCount,
         reached: successCount,
         campaignId: batchId,
-        campaignName: humanName,
       });
     }
   } catch {}
@@ -584,6 +587,11 @@ export function Send({ onMessageSent }: SendProps) {
     });
 
     toast.success(`Envío completado: ${successCount} exitosos, ${errorCount} errores`);
+    
+    // ✅ Redirigir al Dashboard después de completar el envío
+    setTimeout(() => {
+      navigate('/');
+    }, 2000);
   };
 
   return (

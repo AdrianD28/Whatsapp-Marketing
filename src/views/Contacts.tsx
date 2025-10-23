@@ -210,15 +210,46 @@ export function Contacts() {
   };
 
   const downloadTemplate = () => {
-    const headers = ['CELULAR', '{{1}}', '{{2}}', '{{3}}', '{{4}}', '{{5}}', '{{6}}', '{{7}}', '{{8}}'];
-    const exampleRow = ['573118460278', 'Ejemplo1', 'Ejemplo2', 'Ejemplo3', 'Ejemplo4', 'Ejemplo5', 'Ejemplo6', 'Ejemplo7', 'Ejemplo8'];
-    const data = [headers, exampleRow];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Contactos");
-    XLSX.writeFile(wb, "plantilla_contactos.xlsx");
-    
-    toast.success('Plantilla descargada');
+    // Si hay una lista seleccionada, descargar sus contactos
+    if (selectedList && contacts.length > 0) {
+      const headers = ['CELULAR', '{{1}}', '{{2}}', '{{3}}', '{{4}}', '{{5}}', '{{6}}', '{{7}}', '{{8}}'];
+      const data = [headers];
+      
+      // Agregar cada contacto de la lista actual
+      contacts.forEach((c: Contact) => {
+        data.push([
+          c.numero || '',
+          c.parametros?.['{{1}}'] || '',
+          c.parametros?.['{{2}}'] || '',
+          c.parametros?.['{{3}}'] || '',
+          c.parametros?.['{{4}}'] || '',
+          c.parametros?.['{{5}}'] || '',
+          c.parametros?.['{{6}}'] || '',
+          c.parametros?.['{{7}}'] || '',
+          c.parametros?.['{{8}}'] || ''
+        ]);
+      });
+      
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Contactos");
+      
+      const listName = lists.find((l: any) => l._id === selectedList)?.name || 'lista';
+      XLSX.writeFile(wb, `${listName}_contactos.xlsx`);
+      
+      toast.success(`Lista "${listName}" descargada con ${contacts.length} contactos`);
+    } else {
+      // Si no hay lista seleccionada o está vacía, descargar plantilla vacía
+      const headers = ['CELULAR', '{{1}}', '{{2}}', '{{3}}', '{{4}}', '{{5}}', '{{6}}', '{{7}}', '{{8}}'];
+      const exampleRow = ['573118460278', 'Ejemplo1', 'Ejemplo2', 'Ejemplo3', 'Ejemplo4', 'Ejemplo5', 'Ejemplo6', 'Ejemplo7', 'Ejemplo8'];
+      const data = [headers, exampleRow];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Contactos");
+      XLSX.writeFile(wb, "plantilla_contactos.xlsx");
+      
+      toast.success('Plantilla vacía descargada');
+    }
   };
 
   return (
@@ -345,7 +376,9 @@ export function Contacts() {
               </Button>
             )}
           </div>
-          <Button variant="secondary" size="sm" icon={Download} onClick={downloadTemplate}>Descargar Plantilla</Button>
+          <Button variant="secondary" size="sm" icon={Download} onClick={downloadTemplate}>
+            {selectedList && contacts.length > 0 ? 'Descargar Lista' : 'Descargar Plantilla'}
+          </Button>
           <Button size="sm" icon={Upload} onClick={() => fileInputRef.current?.click()}>Cargar Contactos</Button>
         </div>
       </div>
