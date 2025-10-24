@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { motion } from 'framer-motion';
-import { FileText, Image, Type, MessageSquare, Film, File as FileIcon, MapPin, Plus, Trash2, Link as LinkIcon, Phone, Bold, Italic, Smile } from 'lucide-react';
+import { FileText, Image, Type, MessageSquare, Film, File as FileIcon, MapPin, Plus, Trash2, Link as LinkIcon, Phone } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 import { useAppContext } from '../../context/AppContext';
 import { HelpTooltip } from '../ui/HelpTooltip';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 
 interface TemplateFormData {
   name: string;
@@ -49,6 +48,9 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
 
   const watchedValues = watch();
   
+  // Emojis comunes de WhatsApp
+  const commonEmojis = ['😊', '👍', '❤️', '🎉', '✅', '⚠️', '📱', '💡', '🔥', '⭐', '👏', '🙏', '💪', '🎯', '📢', '🎁'];
+  
   // Funciones para formatear texto
   const insertFormatting = (format: 'bold' | 'italic' | 'strikethrough') => {
     const bodyValue = watchedValues.body || '';
@@ -58,9 +60,9 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
     setBodyCharCount(newValue.length);
   };
   
-  const insertEmoji = (emojiData: EmojiClickData) => {
+  const insertEmoji = (emoji: string) => {
     const bodyValue = watchedValues.body || '';
-    const newValue = bodyValue + emojiData.emoji;
+    const newValue = bodyValue + emoji;
     setValue('body', newValue);
     setBodyCharCount(newValue.length);
     setShowEmojiPicker(false);
@@ -283,7 +285,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
               <button
                 type="button"
                 onClick={() => insertFormatting('bold')}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold"
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold text-white"
                 title="Negrita"
               >
                 *B*
@@ -291,7 +293,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
               <button
                 type="button"
                 onClick={() => insertFormatting('italic')}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm italic"
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm italic text-white"
                 title="Cursiva"
               >
                 _I_
@@ -299,7 +301,7 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
               <button
                 type="button"
                 onClick={() => insertFormatting('strikethrough')}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm line-through"
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm line-through text-white"
                 title="Tachado"
               >
                 ~T~
@@ -316,8 +318,17 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                   😊
                 </button>
                 {showEmojiPicker && (
-                  <div className="absolute top-full mt-2 z-50">
-                    <EmojiPicker onEmojiClick={insertEmoji} />
+                  <div className="absolute top-full mt-2 z-50 bg-gray-800 border border-gray-700 rounded-lg p-3 shadow-xl grid grid-cols-8 gap-2 max-w-xs">
+                    {commonEmojis.map(emoji => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => insertEmoji(emoji)}
+                        className="text-2xl hover:bg-gray-700 rounded p-1 transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
