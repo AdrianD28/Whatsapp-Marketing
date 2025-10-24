@@ -48,8 +48,21 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
 
   const watchedValues = watch();
   
-  // Emojis comunes de WhatsApp
-  const commonEmojis = ['😊', '👍', '❤️', '🎉', '✅', '⚠️', '📱', '💡', '🔥', '⭐', '👏', '🙏', '💪', '🎯', '📢', '🎁'];
+  // Emojis organizados por categorías (10-15 por categoría)
+  const emojiCategories = {
+    '😊 Caras': ['😊', '�', '😄', '😁', '😅', '😂', '🤣', '😉', '😍', '🥰', '😘', '😋', '😎', '🤗', '🤔'],
+    '�👍 Gestos': ['👍', '👏', '🙏', '💪', '✌️', '👌', '🤝', '✊', '👊', '🙌', '👐', '🤲', '👋', '🤚'],
+    '❤️ Emociones': ['❤️', '💕', '💖', '💗', '💙', '💚', '💛', '🧡', '💜', '🖤', '💝', '💘', '💞', '💓'],
+    '🎉 Celebración': ['🎉', '🎊', '🎈', '🎁', '🎀', '🏆', '🥇', '🥈', '🥉', '⭐', '🌟', '✨', '🔥', '💥'],
+    '✅ Símbolos': ['✅', '✔️', '❌', '⚠️', '⚡', '�', '🟢', '🟡', '🔵', '⭕', '❗', '❓', '💯', '🆗'],
+    '�📱 Tecnología': ['📱', '�', '⌨️', '🖥️', '📞', '☎️', '📧', '📩', '📨', '💬', '💭', '🗨️', '📲'],
+    '�💡 Objetos': ['💡', '�', '📣', '�', '�', '�', '📍', '🎯', '🎪', '🎭', '🎨', '🎬', '📸', '📷'],
+    '🏠 Lugares': ['🏠', '🏢', '🏬', '🏪', '🏭', '🏗️', '🏘️', '🏙️', '🌆', '🌇', '🌃', '🌉', '🌁'],
+    '🚗 Transporte': ['🚗', '�', '🚙', '🚌', '🚎', '🏎️', '🚓', '🚑', '🚒', '🚐', '🚚', '🚛', '✈️'],
+    '🍕 Comida': ['🍕', '🍔', '🍟', '🌭', '🍿', '🧃', '🥤', '☕', '🍵', '🍰', '🎂', '🍪', '🍩', '�']
+  };
+  
+  const [selectedCategory, setSelectedCategory] = useState<string>('😊 Caras');
   
   // Funciones para formatear texto
   const insertFormatting = (format: 'bold' | 'italic' | 'strikethrough') => {
@@ -312,23 +325,48 @@ export function TemplateForm({ onSubmit, onCancel, loading = false }: TemplateFo
                 <button
                   type="button"
                   onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-lg"
+                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-lg transition-colors"
                   title="Insertar emoji"
                 >
                   😊
                 </button>
                 {showEmojiPicker && (
-                  <div className="absolute top-full mt-2 z-50 bg-gray-800 border border-gray-700 rounded-lg p-3 shadow-xl grid grid-cols-8 gap-2 max-w-xs">
-                    {commonEmojis.map(emoji => (
-                      <button
-                        key={emoji}
-                        type="button"
-                        onClick={() => insertEmoji(emoji)}
-                        className="text-2xl hover:bg-gray-700 rounded p-1 transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
+                  <div className="absolute top-full mt-2 z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl w-80">
+                    {/* Pestañas de categorías */}
+                    <div className="flex gap-1 p-2 border-b border-gray-700 overflow-x-auto">
+                      {Object.keys(emojiCategories).map(category => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => setSelectedCategory(category)}
+                          className={`px-2 py-1 rounded text-xs whitespace-nowrap transition-colors ${
+                            selectedCategory === category 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          }`}
+                        >
+                          {category.split(' ')[0]}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Grid de emojis */}
+                    <div className="p-3 grid grid-cols-8 gap-1 max-h-64 overflow-y-auto">
+                      {emojiCategories[selectedCategory].map(emoji => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => insertEmoji(emoji)}
+                          className="text-2xl hover:bg-gray-700 rounded p-1 transition-all hover:scale-110"
+                          title={emoji}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Footer */}
+                    <div className="p-2 border-t border-gray-700 text-xs text-gray-400 text-center">
+                      {selectedCategory} - {emojiCategories[selectedCategory].length} emojis
+                    </div>
                   </div>
                 )}
               </div>
