@@ -355,6 +355,147 @@ app.post('/webhook/whatsapp-proxy', async (req, res) => {
   }
 });
 
+// --- Endpoint para enviar mensajes desde Chatwoot con soporte multimedia ---
+app.post('/api/chatwoot/send-message', async (req, res) => {
+  try {
+    const { to, message, media_url, media_type } = req.body;
+    
+    if (!to || !message) {
+      return res.status(400).json({ error: 'Faltan parámetros: to y message son requeridos' });
+    }
+
+    const phoneNumberId = process.env.PHONE_NUMBER_ID;
+    const accessToken = process.env.ACCESS_TOKEN;
+    
+    if (!phoneNumberId || !accessToken) {
+      return res.status(500).json({ error: 'Configuración de WhatsApp incompleta en el servidor' });
+    }
+
+    const toNumber = String(to).replace(/[^\d]/g, '').replace(/^00/, '');
+    const url = `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`;
+
+    let messagePayload;
+
+    // Si hay archivo multimedia, manejarlo
+    if (media_url && media_type) {
+      console.log(`📤 Enviando mensaje multimedia: ${media_type} desde ${media_url}`);
+      
+      // Descargar el archivo desde Chatwoot
+      let mediaId;
+      try {
+        // Descargar archivo
+        const fileResponse = await fetch(media_url);
+        if (!fileResponse.ok) {
+          throw new Error(`No se pudo descargar el archivo: ${fileResponse.status}`);
+        }
+        
+        const fileBuffer = await fileResponse.arrayBuffer();
+        const blob = new Blob([fileBuffer], { type: fileResponse.headers.get('content-type') || 'application/octet-stream' });
+        
+        // Subir a WhatsApp
+        const form = new FormData();
+        form.append('messaging_product', 'whatsapp');
+        form.append('file', blob, 'file');
+        
+        const uploadUrl = `https://graph.facebook.com/v22.0/${phoneNumberId}/media`;
+        const uploadResponse = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          body: form
+        });
+        
+        if (!uploadResponse.ok) {
+          const errorText = await uploadResponse.text();
+          console.error('Error subiendo media a WhatsApp:', errorText);
+          throw new Error(`Error subiendo archivo a WhatsApp: ${uploadResponse.status}`);
+        }
+        
+        const uploadResult = await uploadResponse.json();
+        mediaId = uploadResult.id;
+        console.log(`✅ Archivo subido a WhatsApp, media_id: ${mediaId}`);
+      } catch (uploadError) {
+        console.error('Error en upload de media:', uploadError);
+        // Si falla la subida, intentar enviar solo texto
+        messagePayload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: toNumber,
+          type: 'text',
+          text: { body: message || 'Archivo multimedia (error al subir)' }
+        };
+      }
+
+      // Construir mensaje según tipo de media
+      if (mediaId) {
+        const mediaTypeMap = {
+          'image': 'image',
+          'audio': 'audio',
+          'video': 'video',
+          'document': 'document',
+          'file': 'document'
+        };
+        
+        const whatsappMediaType = mediaTypeMap[media_type] || 'document';
+        
+        messagePayload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: toNumber,
+          type: whatsappMediaType,
+          [whatsappMediaType]: {
+            id: mediaId,
+            caption: message || undefined
+          }
+        };
+      }
+    } else {
+      // Mensaje de texto simple
+      messagePayload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: toNumber,
+        type: 'text',
+        text: { body: message }
+      };
+    }
+
+    // Enviar mensaje a WhatsApp
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(messagePayload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error enviando mensaje a WhatsApp:', errorText);
+      return res.status(response.status).json({ 
+        error: 'Error al enviar mensaje',
+        details: errorText
+      });
+    }
+
+    const result = await response.json();
+    console.log(`✅ Mensaje enviado exitosamente desde Chatwoot: ${result.messages?.[0]?.id}`);
+    
+    return res.json({
+      success: true,
+      message_id: result.messages?.[0]?.id,
+      whatsapp_response: result
+    });
+
+  } catch (error) {
+    console.error('Error en /api/chatwoot/send-message:', error);
+    return res.status(500).json({ 
+      error: 'Error interno del servidor',
+      details: error.message 
+    });
+  }
+});
+
 // Serve frontend `dist` if it exists (SPA fallback to index.html)
 const distDir = path.join(process.cwd(), 'dist');
 if (fs.existsSync(distDir)) {
