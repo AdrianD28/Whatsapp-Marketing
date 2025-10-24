@@ -106,7 +106,16 @@ export function Statistics() {
       ];
 
       (full.events || []).forEach((e: any) => {
-        const body = String(meta.templateBody || '').replace(/\{\{1\}\}/g, e.lastRecipient || '');
+        // Usar el mensaje real enviado si está disponible, sino construir uno básico
+        let body = e.realMessage || '';
+        
+        // Fallback: si no hay realMessage, intentar construir desde template
+        if (!body) {
+          body = String(meta.templateBody || '');
+          // Reemplazar variables conocidas (esto es un fallback, el realMessage debería estar)
+          body = body.replace(/\{\{1\}\}/g, e.lastRecipient || '');
+        }
+        
         const recipient = e.lastRecipient || '';
         const messageId = e.messageId || '';
         const status = e.status ? e.status.toUpperCase() : '';

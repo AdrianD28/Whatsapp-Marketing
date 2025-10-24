@@ -1570,6 +1570,26 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
       response: JSON.stringify(graphJson, null, 2)
     });
     
+    // Construir mensaje real con parámetros reemplazados para guardarlo en logs
+    let constructedMessage = '';
+    try {
+      // Buscar el componente BODY en la plantilla
+      const bodyComponent = template?.components?.find(c => c.type === 'BODY');
+      if (bodyComponent && bodyComponent.parameters && Array.isArray(bodyComponent.parameters)) {
+        // Iniciar con el texto base del body (si está disponible en el template original)
+        constructedMessage = bodyComponent.text || '';
+        
+        // Reemplazar cada {{N}} con su parámetro correspondiente
+        bodyComponent.parameters.forEach((param, index) => {
+          const placeholder = `{{${index + 1}}}`;
+          const value = param.text || '';
+          constructedMessage = constructedMessage.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'g'), value);
+        });
+      }
+    } catch (msgErr) {
+      console.warn('No se pudo construir mensaje para logs:', msgErr);
+    }
+    
     // Verificar si hay información adicional de error en la respuesta
     if (graphJson?.error) {
       console.error('🔥 ERROR EN RESPUESTA DE WHATSAPP:', JSON.stringify(graphJson.error, null, 2));
@@ -1578,12 +1598,15 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     // Insertar log
     let logId = null;
     try {
+      const messageId = graphJson?.messages?.[0]?.id || null;
       const logDoc = {
         userId: userIdObj,
         time: new Date().toISOString(),
         to: String(to),
         templateName: template?.name,
         batchId: batchId || null,
+        messageId: messageId,
+        message: constructedMessage || '', // Mensaje real con parámetros reemplazados
         requestPayload: payload,
         graphStatus: gRes.status,
         graphResponse: graphJson,
@@ -2813,6 +2836,29 @@ app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
     if (q) evFilter['lastRecipient'] = { $regex: q.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), $options: 'i' };
     const cursor = db.collection('message_events').find(evFilter).sort({ updatedAt: -1 }).skip(skip).limit(limit);
     const events = await cursor.toArray();
+    
+    // Obtener los mensajes reales enviados desde send_logs para cada evento
+    const messageIds = events.map(e => e.messageId).filter(Boolean);
+    const sendLogs = await db.collection('send_logs').find({
+      userId: userIdObj,
+      messageId: { $in: messageIds }
+    }).toArray();
+    
+    // Crear un mapa de messageId -> mensaje real
+    const messageMap = {};
+    sendLogs.forEach(log => {
+      if (log.messageId) {
+        messageMap[log.messageId] = log.message || log.body || '';
+      }
+    });
+    
+    // Agregar el mensaje real a cada evento
+    events.forEach(e => {
+      if (e.messageId && messageMap[e.messageId]) {
+        e.realMessage = messageMap[e.messageId];
+      }
+    });
+    
     // Totales usando statusHistory para contar correctamente
     const deliveredCount = await db.collection('message_events').countDocuments({
       userId: userIdObj,
