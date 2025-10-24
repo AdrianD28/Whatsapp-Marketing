@@ -355,6 +355,200 @@ app.post('/webhook/whatsapp-proxy', async (req, res) => {
   }
 });
 
+// --- Proxy completo de WhatsApp API para Chatwoot ---
+// Este proxy se hace pasar por graph.facebook.com y maneja correctamente archivos multimedia
+// Chatwoot debe configurarse para usar este endpoint como "API Base URL"
+
+// Proxy para enviar mensajes (POST /v22.0/{phone-number-id}/messages)
+app.post('/api/whatsapp-proxy/v22.0/:phoneNumberId/messages', async (req, res) => {
+  try {
+    const { phoneNumberId } = req.params;
+    const messagePayload = req.body;
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authorization header required' });
+    }
+
+    const accessToken = authHeader.replace('Bearer ', '');
+    console.log('📨 Chatwoot → Proxy: Enviando mensaje', { 
+      to: messagePayload.to, 
+      type: messagePayload.type 
+    });
+
+    let finalPayload = { ...messagePayload };
+    
+    // Detectar y manejar archivos multimedia con link
+    const mediaTypes = ['image', 'audio', 'video', 'document'];
+    for (const mediaType of mediaTypes) {
+      if (messagePayload.type === mediaType && messagePayload[mediaType]?.link) {
+        const mediaLink = messagePayload[mediaType].link;
+        console.log(`📎 Detectado ${mediaType} con link: ${mediaLink}`);
+        
+        try {
+          // Descargar archivo desde Chatwoot
+          console.log(`⬇️ Descargando archivo desde Chatwoot...`);
+          const fileResponse = await fetch(mediaLink);
+          
+          if (!fileResponse.ok) {
+            console.error(`❌ Error descargando archivo: ${fileResponse.status}`);
+            throw new Error(`No se pudo descargar archivo: ${fileResponse.status}`);
+          }
+          
+          const contentType = fileResponse.headers.get('content-type') || 'application/octet-stream';
+          const fileBuffer = await fileResponse.arrayBuffer();
+          const fileBlob = new Blob([fileBuffer], { type: contentType });
+          
+          console.log(`📤 Subiendo ${mediaType} a WhatsApp (${fileBuffer.byteLength} bytes)...`);
+          
+          // Subir archivo a WhatsApp para obtener media_id
+          const uploadForm = new FormData();
+          uploadForm.append('messaging_product', 'whatsapp');
+          uploadForm.append('file', fileBlob, `file.${mediaType}`);
+          
+          const uploadUrl = `https://graph.facebook.com/v22.0/${phoneNumberId}/media`;
+          const uploadResponse = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            body: uploadForm
+          });
+          
+          if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text();
+            console.error('❌ Error subiendo a WhatsApp:', errorText);
+            throw new Error(`Error subiendo a WhatsApp: ${uploadResponse.status}`);
+          }
+          
+          const uploadResult = await uploadResponse.json();
+          const mediaId = uploadResult.id;
+          
+          console.log(`✅ Archivo subido exitosamente, media_id: ${mediaId}`);
+          
+          // Reemplazar link con id en el payload
+          finalPayload[mediaType] = {
+            id: mediaId,
+            caption: messagePayload[mediaType].caption
+          };
+          
+        } catch (error) {
+          console.error(`❌ Error procesando ${mediaType}:`, error);
+          // Si falla, intentar enviar el link original y dejar que WhatsApp maneje el error
+          // O convertir a mensaje de texto
+          return res.status(500).json({
+            error: {
+              message: `Error procesando archivo multimedia: ${error.message}`,
+              type: 'OAuthException',
+              code: 100
+            }
+          });
+        }
+        
+        break; // Solo procesar un tipo de media a la vez
+      }
+    }
+    
+    // Enviar mensaje a WhatsApp API real
+    const whatsappUrl = `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`;
+    console.log('📤 Proxy → WhatsApp: Enviando mensaje final');
+    
+    const whatsappResponse = await fetch(whatsappUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(finalPayload)
+    });
+    
+    const responseData = await whatsappResponse.json();
+    
+    if (!whatsappResponse.ok) {
+      console.error('❌ WhatsApp API error:', responseData);
+      return res.status(whatsappResponse.status).json(responseData);
+    }
+    
+    console.log('✅ Mensaje enviado exitosamente:', responseData.messages?.[0]?.id);
+    return res.json(responseData);
+    
+  } catch (error) {
+    console.error('❌ Error en proxy de WhatsApp:', error);
+    return res.status(500).json({
+      error: {
+        message: error.message,
+        type: 'OAuthException',
+        code: 100
+      }
+    });
+  }
+});
+
+// Proxy para subir media (POST /v22.0/{phone-number-id}/media)
+app.post('/api/whatsapp-proxy/v22.0/:phoneNumberId/media', async (req, res) => {
+  try {
+    const { phoneNumberId } = req.params;
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authorization header required' });
+    }
+
+    const accessToken = authHeader.replace('Bearer ', '');
+    
+    console.log('📤 Proxy: Reenviando upload de media a WhatsApp');
+    
+    // Reenviar la petición tal cual a WhatsApp
+    const whatsappUrl = `https://graph.facebook.com/v22.0/${phoneNumberId}/media`;
+    const whatsappResponse = await fetch(whatsappUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        ...req.headers
+      },
+      body: req.body
+    });
+    
+    const responseData = await whatsappResponse.json();
+    
+    if (!whatsappResponse.ok) {
+      console.error('❌ Error en upload de media:', responseData);
+      return res.status(whatsappResponse.status).json(responseData);
+    }
+    
+    console.log('✅ Media subido:', responseData.id);
+    return res.json(responseData);
+    
+  } catch (error) {
+    console.error('❌ Error en proxy de media upload:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// Proxy para obtener info de media (GET /v22.0/{media-id})
+app.get('/api/whatsapp-proxy/v22.0/:mediaId', async (req, res) => {
+  try {
+    const { mediaId } = req.params;
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader) {
+      return res.status(401).json({ error: 'Authorization header required' });
+    }
+
+    const accessToken = authHeader.replace('Bearer ', '');
+    
+    const whatsappUrl = `https://graph.facebook.com/v22.0/${mediaId}`;
+    const whatsappResponse = await fetch(whatsappUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    const responseData = await whatsappResponse.json();
+    return res.status(whatsappResponse.status).json(responseData);
+    
+  } catch (error) {
+    console.error('❌ Error en proxy de media info:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // --- Endpoint para enviar mensajes desde Chatwoot con soporte multimedia ---
 app.post('/api/chatwoot/send-message', async (req, res) => {
   try {
