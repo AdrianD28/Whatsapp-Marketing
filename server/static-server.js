@@ -1543,6 +1543,39 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
       type: 'template',
       template: template,
     };
+    
+    // 📝 Construir mensaje real antes de enviar
+    let constructedMessage = '';
+    try {
+      // Buscar la plantilla en templates collection para obtener el texto original
+      const templateDoc = await db.collection('templates').findOne({ 
+        name: template.name 
+      });
+      
+      if (templateDoc) {
+        // Buscar el componente BODY en la plantilla almacenada
+        const bodyComponent = templateDoc.components?.find(c => c.type === 'BODY');
+        if (bodyComponent && bodyComponent.text) {
+          constructedMessage = bodyComponent.text;
+          
+          // Reemplazar cada {{N}} con su parámetro correspondiente del template enviado
+          const bodyParams = template.components?.find(c => c.type === 'BODY' || c.type === 'body')?.parameters || [];
+          bodyParams.forEach((param, index) => {
+            const placeholder = `{{${index + 1}}}`;
+            const value = param.text || '';
+            // Escapar caracteres especiales del placeholder para regex
+            const escapedPlaceholder = placeholder.replace(/[{}]/g, '\\$&');
+            constructedMessage = constructedMessage.replace(new RegExp(escapedPlaceholder, 'g'), value);
+          });
+          
+          console.log('✉️ Mensaje construido:', constructedMessage.substring(0, 100) + '...');
+        }
+      } else {
+        console.warn('⚠️ No se encontró la plantilla en DB:', template.name);
+      }
+    } catch (msgErr) {
+      console.warn('⚠️ Error construyendo mensaje:', msgErr);
+    }
 
     const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
     console.log('📤 Enviando a WhatsApp API:', { 
@@ -1569,26 +1602,6 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
       ok: gRes.ok,
       response: JSON.stringify(graphJson, null, 2)
     });
-    
-    // Construir mensaje real con parámetros reemplazados para guardarlo en logs
-    let constructedMessage = '';
-    try {
-      // Buscar el componente BODY en la plantilla
-      const bodyComponent = template?.components?.find(c => c.type === 'BODY');
-      if (bodyComponent && bodyComponent.parameters && Array.isArray(bodyComponent.parameters)) {
-        // Iniciar con el texto base del body (si está disponible en el template original)
-        constructedMessage = bodyComponent.text || '';
-        
-        // Reemplazar cada {{N}} con su parámetro correspondiente
-        bodyComponent.parameters.forEach((param, index) => {
-          const placeholder = `{{${index + 1}}}`;
-          const value = param.text || '';
-          constructedMessage = constructedMessage.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'g'), value);
-        });
-      }
-    } catch (msgErr) {
-      console.warn('No se pudo construir mensaje para logs:', msgErr);
-    }
     
     // Verificar si hay información adicional de error en la respuesta
     if (graphJson?.error) {
