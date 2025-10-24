@@ -1547,31 +1547,85 @@ app.post('/api/wa/send-template', requireUser, async (req, res) => {
     // 📝 Construir mensaje real antes de enviar
     let constructedMessage = '';
     try {
-      // Buscar la plantilla en templates collection para obtener el texto original
-      const templateDoc = await db.collection('templates').findOne({ 
-        name: template.name 
-      });
+      // Buscar el templateBody desde la sesión de la campaña (si existe batchId)
+      let templateBodyText = '';
       
-      if (templateDoc) {
-        // Buscar el componente BODY en la plantilla almacenada
-        const bodyComponent = templateDoc.components?.find(c => c.type === 'BODY');
-        if (bodyComponent && bodyComponent.text) {
-          constructedMessage = bodyComponent.text;
-          
-          // Reemplazar cada {{N}} con su parámetro correspondiente del template enviado
-          const bodyParams = template.components?.find(c => c.type === 'BODY' || c.type === 'body')?.parameters || [];
-          bodyParams.forEach((param, index) => {
-            const placeholder = `{{${index + 1}}}`;
-            const value = param.text || '';
-            // Escapar caracteres especiales del placeholder para regex
-            const escapedPlaceholder = placeholder.replace(/[{}]/g, '\\$&');
-            constructedMessage = constructedMessage.replace(new RegExp(escapedPlaceholder, 'g'), value);
+      if (batchId) {
+        console.log('🔍 Buscando sesión con userId:', userIdObj, 'campaignId:', batchId);
+        
+        // Intentar buscar de ambas formas: con ObjectId y con string
+        let session = await db.collection('sessions').findOne({ 
+          userId: userIdObj,
+          campaignId: batchId 
+        });
+        
+        // Si no encuentra, intentar con userId como string
+        if (!session) {
+          console.log('🔍 Reintentando búsqueda con userId como string');
+          session = await db.collection('sessions').findOne({ 
+            userId: req.userId, // String directamente
+            campaignId: batchId 
           });
-          
-          console.log('✉️ Mensaje construido:', constructedMessage.substring(0, 100) + '...');
         }
+        
+        console.log('📋 Sesión encontrada:', session ? 'SÍ' : 'NO');
+        if (session) {
+          console.log('📋 Datos de sesión:', {
+            templateName: session.templateName,
+            campaignId: session.campaignId,
+            templateBodyLength: session.templateBody?.length || 0
+          });
+        } else {
+          // Buscar todas las sesiones del usuario para debug
+          const allSessions = await db.collection('sessions').find({ 
+            $or: [{ userId: userIdObj }, { userId: req.userId }]
+          }).limit(5).toArray();
+          console.log('📋 Sesiones disponibles para este usuario:', allSessions.map(s => ({
+            campaignId: s.campaignId,
+            templateName: s.templateName,
+            timestamp: s.timestamp
+          })));
+        }
+        templateBodyText = session?.templateBody || '';
+        if (templateBodyText) {
+          console.log('📄 Template body desde sesión:', templateBodyText.substring(0, 100) + '...');
+        }
+      }
+      
+      // Si no hay session, intentar obtener desde Meta API (plantillas aprobadas del usuario)
+      if (!templateBodyText) {
+        try {
+          const metaUrl = `https://graph.facebook.com/v22.0/${creds.businessAccountId}/message_templates?name=${template.name}`;
+          const metaRes = await fetch(metaUrl, {
+            headers: { 'Authorization': `Bearer ${creds.accessToken}` }
+          });
+          if (metaRes.ok) {
+            const metaData = await metaRes.json();
+            const templateFromMeta = metaData.data?.find(t => t.name === template.name);
+            const bodyComp = templateFromMeta?.components?.find(c => c.type === 'BODY');
+            templateBodyText = bodyComp?.text || '';
+            console.log('📄 Template body desde Meta:', templateBodyText.substring(0, 100) + '...');
+          }
+        } catch (metaErr) {
+          console.warn('⚠️ No se pudo obtener template de Meta:', metaErr.message);
+        }
+      }
+      
+      if (templateBodyText) {
+        constructedMessage = templateBodyText;
+        
+        // Reemplazar cada {{N}} con su parámetro correspondiente
+        const bodyParams = template.components?.find(c => c.type === 'BODY' || c.type === 'body')?.parameters || [];
+        bodyParams.forEach((param, index) => {
+          const placeholder = `{{${index + 1}}}`;
+          const value = param.text || '';
+          const escapedPlaceholder = placeholder.replace(/[{}]/g, '\\$&');
+          constructedMessage = constructedMessage.replace(new RegExp(escapedPlaceholder, 'g'), value);
+        });
+        
+        console.log('✉️ Mensaje construido:', constructedMessage.substring(0, 150) + '...');
       } else {
-        console.warn('⚠️ No se encontró la plantilla en DB:', template.name);
+        console.warn('⚠️ No se encontró el texto de la plantilla:', template.name);
       }
     } catch (msgErr) {
       console.warn('⚠️ Error construyendo mensaje:', msgErr);
