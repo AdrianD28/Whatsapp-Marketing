@@ -1848,6 +1848,64 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
   }
   */
 
+  // 📝 Construir mensaje real antes de enviar
+  let constructedMessage = '';
+  try {
+    // Buscar el templateBody desde la sesión de la campaña (si existe batchId)
+    let templateBodyText = '';
+    
+    if (batchId) {
+      const session = await db.collection('sessions').findOne({ 
+        userId: new ObjectId(userId),
+        campaignId: batchId 
+      });
+      
+      // Si no encuentra, intentar con userId como string
+      if (!session) {
+        const sessionAlt = await db.collection('sessions').findOne({ 
+          userId: userId, // String directamente
+          campaignId: batchId 
+        });
+        templateBodyText = sessionAlt?.templateBody || '';
+      } else {
+        templateBodyText = session?.templateBody || '';
+      }
+    }
+    
+    // Si no hay session, intentar obtener desde Meta API
+    if (!templateBodyText && creds.businessAccountId) {
+      try {
+        const metaUrl = `https://graph.facebook.com/v22.0/${creds.businessAccountId}/message_templates?name=${template.name}`;
+        const metaRes = await fetch(metaUrl, {
+          headers: { 'Authorization': `Bearer ${creds.accessToken}` }
+        });
+        if (metaRes.ok) {
+          const metaData = await metaRes.json();
+          const templateFromMeta = metaData.data?.find(t => t.name === template.name);
+          const bodyComp = templateFromMeta?.components?.find(c => c.type === 'BODY');
+          templateBodyText = bodyComp?.text || '';
+        }
+      } catch (metaErr) {
+        console.warn('⚠️ No se pudo obtener template de Meta:', metaErr.message);
+      }
+    }
+    
+    if (templateBodyText) {
+      constructedMessage = templateBodyText;
+      
+      // Reemplazar cada {{N}} con su parámetro correspondiente
+      const bodyParams = template.components?.find(c => c.type === 'BODY' || c.type === 'body')?.parameters || [];
+      bodyParams.forEach((param, index) => {
+        const placeholder = `{{${index + 1}}}`;
+        const value = param.text || '';
+        const escapedPlaceholder = placeholder.replace(/[{}]/g, '\\$&');
+        constructedMessage = constructedMessage.replace(new RegExp(escapedPlaceholder, 'g'), value);
+      });
+    }
+  } catch (msgErr) {
+    console.warn('⚠️ Error construyendo mensaje:', msgErr);
+  }
+
   const payload = {
     messaging_product: 'whatsapp',
     to: String(to),
@@ -1888,6 +1946,7 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
     to: String(to),
     templateName: template?.name,
     batchId: batchId || null,
+    message: constructedMessage || '', // 📝 Mensaje real con parámetros reemplazados
     requestPayload: payload,
     graphStatus: gRes.status,
     graphResponse: graphJson,
@@ -1916,13 +1975,22 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
 
 // Procesar campaña en background
 async function processCampaignBackground(campaignId) {
+  console.log(`\n🚀 ===== INICIANDO CAMPAÑA BACKGROUND: ${campaignId} =====`);
   const db = await getDb();
   let campaign = await db.collection('campaigns').findOne({ _id: new ObjectId(campaignId) });
   
   if (!campaign) {
-    console.error(`Campaign ${campaignId} not found`);
+    console.error(`❌ Campaign ${campaignId} not found`);
     return;
   }
+
+  console.log(`📋 Campaña encontrada:`, {
+    id: campaign._id,
+    userId: campaign.userId,
+    contacts: campaign.contacts?.length || 0,
+    template: campaign.template?.name,
+    batchId: campaign.batchId
+  });
 
   try {
     // Marcar como procesando
@@ -1932,15 +2000,28 @@ async function processCampaignBackground(campaignId) {
     );
 
     const user = await db.collection('users').findOne({ _id: campaign.userId });
+    console.log(`👤 Usuario encontrado:`, {
+      id: user?._id,
+      email: user?.email,
+      credits: user?.credits,
+      hasCreds: !!user?.metaCreds
+    });
+    
     const creds = user?.metaCreds || {};
     
     if (!creds.accessToken || !creds.phoneNumberId) {
+      console.error(`❌ Credenciales faltantes:`, {
+        hasToken: !!creds.accessToken,
+        hasPhoneId: !!creds.phoneNumberId
+      });
       await db.collection('campaigns').updateOne(
         { _id: campaign._id },
         { $set: { status: 'failed', error: 'missing_credentials', completedAt: new Date().toISOString() } }
       );
       return;
     }
+    
+    console.log(`✅ Credenciales válidas encontradas`);
 
     // 🚨 CRÍTICO: Filtrar contactos con opt-out ANTES de empezar
     const allContacts = campaign.contacts || [];
@@ -2028,6 +2109,8 @@ async function processCampaignBackground(campaignId) {
 
       const contact = contacts[i];
       
+      console.log(`📤 Enviando ${i+1}/${contacts.length} a ${contact.numero}...`);
+      
       try {
         // 🚨 CRÍTICO: Validar que no haya hecho opt-out durante la campaña
         const recentOptOut = await db.collection('opt_outs').findOne({ numero: contact.numero });
@@ -2046,13 +2129,22 @@ async function processCampaignBackground(campaignId) {
           creds
         );
 
+        console.log(`✉️ Resultado envío ${contact.numero}:`, {
+          success: result.success,
+          skipped: result.skipped,
+          error: result.error,
+          messageId: result.messageId
+        });
+
         if (result.skipped) {
           skippedCount++;
           console.log(`⚠️ Skipped ${contact.numero}: ${result.error}`);
         } else if (result.success) {
           successCount++;
+          console.log(`✅ Enviado exitosamente a ${contact.numero}`);
         } else {
           failedCount++;
+          console.log(`❌ Falló envío a ${contact.numero}: ${result.error || 'unknown'}`);
         }
 
         // Actualizar progreso en DB cada 10 mensajes
@@ -2820,8 +2912,20 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
     for (const c of campaigns) {
       const match = { userId: userIdObj, ...(c.campaignId ? { batchId: c.campaignId } : {}) };
       
-
       try {
+        // 📊 CAMBIO CRÍTICO: Contar desde send_logs para total REAL de destinatarios
+        const totalFromLogs = await db.collection('send_logs').countDocuments({
+          userId: userIdObj,
+          batchId: c.campaignId
+        });
+        
+        // Contar errores de envío (antes de llegar a Meta)
+        const sendErrorsCount = await db.collection('send_logs').countDocuments({
+          userId: userIdObj,
+          batchId: c.campaignId,
+          success: false
+        });
+
         const agg = await db.collection('message_events').aggregate([
           { $match: match },
           { $project: { messageId: 1, statusHistory: 1 } },
@@ -2848,20 +2952,34 @@ app.get('/api/reports/campaigns', requireUser, async (req, res) => {
         ]).toArray();
 
         const result = (agg && agg[0]) ? agg[0] : { delivered: 0, read: 0, failed: 0, total: 0 };
+        
+        // Usar el total de send_logs si es mayor (más preciso)
+        const actualTotal = totalFromLogs > 0 ? totalFromLogs : (result.total || 0);
+        
         c['counts'] = {
+          total: actualTotal, // Total REAL de destinatarios (desde send_logs)
           delivered: result.delivered || 0,
           read: result.read || 0,
-          failed: result.failed || 0,
-          total: result.total || 0
+          failed: result.failed || 0, // Fallidos en Meta
+          sendErrors: sendErrorsCount // Errores de envío
         };
       } catch (aggErr) {
         console.error('/api/reports/campaigns aggregation error', aggErr);
         // Fallback a conteos simples si la agregación falla
+        const totalFromLogs = await db.collection('send_logs').countDocuments({ userId: userIdObj, batchId: c.campaignId });
+        const sendErrorsCount = await db.collection('send_logs').countDocuments({ userId: userIdObj, batchId: c.campaignId, success: false });
         const deliveredCount = await db.collection('message_events').countDocuments({ ...match, statusHistory: 'delivered' });
         const readCount = await db.collection('message_events').countDocuments({ ...match, statusHistory: 'read' });
         const failedCount = await db.collection('message_events').countDocuments({ ...match, $or: [{ statusHistory: 'failed' }, { statusHistory: 'undelivered' }] });
-        const totalCount = await db.collection('message_events').countDocuments(match);
-        c['counts'] = { delivered: deliveredCount, read: readCount, failed: failedCount, total: totalCount };
+        const totalEvents = await db.collection('message_events').countDocuments(match);
+        
+        c['counts'] = { 
+          total: totalFromLogs > 0 ? totalFromLogs : totalEvents,
+          delivered: deliveredCount, 
+          read: readCount, 
+          failed: failedCount,
+          sendErrors: sendErrorsCount
+        };
       }
     }
     
