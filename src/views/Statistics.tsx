@@ -51,8 +51,7 @@ export function Statistics() {
     return campaigns.map(c => {
       const counts = (c as any).counts || {};
       
-      // IMPORTANTE: usar counts.total directamente (número de mensajes únicos)
-      // NO sumar delivered+read+failed porque un mensaje puede tener múltiples estados
+      // CORRECCIÓN: Usar el total real de send_logs (incluye exitosos + fallidos)
       const totalMessages = counts['total'] || 0;
       
       // Si no hay eventos aún, usar el total de la sesión si está disponible
@@ -61,11 +60,13 @@ export function Statistics() {
       // Estados específicos desde el backend
       const delivered = counts['delivered'] || 0;
       const read = counts['read'] || 0;
-      const failed = counts['failed'] || 0;
+      const failed = counts['failed'] || 0; // Fallidos reportados por Meta
+      const sendErrors = counts['sendErrors'] || 0; // Errores al enviar (antes de Meta)
       
-      // Tasas de entrega y lectura
-      // La tasa de entrega es: delivered / total (sin incluir read, porque delivered ya cuenta los que luego fueron read)
-      // La tasa de lectura es: read / total
+      // Total de errores = errores de envío + fallidos en Meta
+      const totalErrors = sendErrors + failed;
+      
+      // Tasas de entrega y lectura basadas en el total REAL de destinatarios
       const deliveryRate = recipients > 0 ? Math.round((delivered / recipients) * 100) : 0;
       const readRate = recipients > 0 ? Math.round((read / recipients) * 100) : 0;
       
@@ -74,9 +75,10 @@ export function Statistics() {
         total: recipients,
         delivered, 
         read, 
-        failed, 
+        failed: totalErrors, // Mostrar total de errores
         rate: deliveryRate, 
-        readRate 
+        readRate,
+        errorDetails: counts['errors'] || [] // Detalles de errores para el modal
       };
     });
   }, [campaigns]);
@@ -281,7 +283,23 @@ export function Statistics() {
                     <td className="px-2 py-2 text-gray-300">{c.total ?? '-'}</td>
                     <td className="px-2 py-2 text-green-400">{c.delivered}</td>
                     <td className="px-2 py-2 text-blue-400">{c.read}</td>
-                    <td className="px-2 py-2 text-red-400">{c.failed}</td>
+                    <td className="px-2 py-2">
+                      {c.failed > 0 ? (
+                        <div className="flex items-center gap-1">
+                          <span className="text-red-400">{c.failed}</span>
+                          {(c as any).errorDetails && (c as any).errorDetails.length > 0 && (
+                            <span 
+                              className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded cursor-help"
+                              title={`${(c as any).errorDetails.length} error(es) detectado(s)`}
+                            >
+                              ⚠️
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-500">0</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2 text-white font-semibold">{c.rate}%</td>
                     <td className="px-2 py-2 text-white">{c.readRate}%</td>
                     <td className="px-2 py-2 text-right flex gap-2">

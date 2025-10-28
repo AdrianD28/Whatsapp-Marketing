@@ -15,6 +15,14 @@ interface CampaignDetailModalProps {
     failed: number;
     rate: number;
     readRate: number;
+    errorDetails?: Array<{
+      recipient: string;
+      time: string;
+      status: number;
+      error: string;
+      errorCode: string | null;
+      errorType: string | null;
+    }>;
   } | null;
 }
 
@@ -234,6 +242,54 @@ export default function CampaignDetailModal({ isOpen, onClose, campaign }: Campa
                   se consideran excelentes métricas para campañas de WhatsApp.
                 </p>
               </div>
+
+              {/* Sección de Errores Detallados */}
+              {campaign.errorDetails && campaign.errorDetails.length > 0 && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
+                  <h3 className="text-red-400 font-semibold mb-4 flex items-center gap-2">
+                    <XCircle className="w-5 h-5" />
+                    Errores Detectados ({campaign.errorDetails.length})
+                  </h3>
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {campaign.errorDetails.map((error, idx) => (
+                      <div key={idx} className="bg-gray-800/50 rounded-lg p-4 border border-red-500/20">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-white font-semibold">{error.recipient}</span>
+                              {error.errorCode && (
+                                <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
+                                  Código: {error.errorCode}
+                                </span>
+                              )}
+                              {error.errorType && (
+                                <span className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded">
+                                  {error.errorType}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-red-300 text-sm mb-1">{error.error}</p>
+                            <p className="text-gray-500 text-xs">
+                              {new Date(error.time).toLocaleString('es-CO', {
+                                timeZone: 'America/Bogota',
+                                dateStyle: 'short',
+                                timeStyle: 'short'
+                              })}
+                            </p>
+                          </div>
+                          <div className="text-gray-500 text-xs">
+                            HTTP {error.status}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 text-gray-400 text-xs">
+                    💡 <strong>Nota:</strong> Estos errores ocurrieron al intentar enviar el mensaje a WhatsApp. 
+                    Verifica que los números sean válidos y que la cuenta tenga los permisos necesarios.
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer Actions */}

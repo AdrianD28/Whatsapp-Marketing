@@ -2926,20 +2926,30 @@ app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
       }
     });
     
-    // Totales usando statusHistory para contar correctamente
+    // 📊 TOTALES CORREGIDOS: Usar send_logs para contar destinatarios REALES
+    
+    // 1. TOTAL/DESTINATARIOS: Todos los intentos de envío (exitosos + fallidos)
+    const totalCount = await db.collection('send_logs').countDocuments({
+      userId: userIdObj,
+      batchId: id
+    });
+    
+    // 2. ENTREGADOS: Solo los que Meta confirmó como entregados
     const deliveredCount = await db.collection('message_events').countDocuments({
       userId: userIdObj,
       batchId: id,
       statusHistory: 'delivered'
     });
     
+    // 3. LEÍDOS: Solo los que el destinatario abrió
     const readCount = await db.collection('message_events').countDocuments({
       userId: userIdObj,
       batchId: id,
       statusHistory: 'read'
     });
     
-    const failedCount = await db.collection('message_events').countDocuments({
+    // 4. FALLIDOS EN META: Los que Meta reportó como failed/undelivered
+    const failedInMetaCount = await db.collection('message_events').countDocuments({
       userId: userIdObj,
       batchId: id,
       $or: [
@@ -2948,16 +2958,39 @@ app.get('/api/reports/campaigns/:id', requireUser, async (req, res) => {
       ]
     });
     
-    const totalCount = await db.collection('message_events').countDocuments({
+    // 5. ERRORES DE ENVÍO: Los que fallaron ANTES de llegar a Meta (ej: número inválido)
+    const sendErrorsCount = await db.collection('send_logs').countDocuments({
       userId: userIdObj,
-      batchId: id
+      batchId: id,
+      success: false
     });
     
+    // 6. OBTENER DETALLES DE ERRORES para mostrar al usuario
+    const errorDetails = await db.collection('send_logs').find({
+      userId: userIdObj,
+      batchId: id,
+      success: false
+    }).project({
+      to: 1,
+      time: 1,
+      graphStatus: 1,
+      graphResponse: 1
+    }).toArray();
+    
     const counts = {
+      total: totalCount, // Total REAL de destinatarios
       delivered: deliveredCount,
       read: readCount,
-      failed: failedCount,
-      total: totalCount
+      failed: failedInMetaCount, // Fallidos reportados por Meta
+      sendErrors: sendErrorsCount, // Errores al enviar (antes de Meta)
+      errors: errorDetails.map(err => ({
+        recipient: err.to,
+        time: err.time,
+        status: err.graphStatus,
+        error: err.graphResponse?.error?.message || 'Error desconocido',
+        errorCode: err.graphResponse?.error?.code || null,
+        errorType: err.graphResponse?.error?.type || null
+      }))
     };
     
     // Intentar recuperar metadata de la sesión
