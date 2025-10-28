@@ -158,25 +158,20 @@ export function Send({ onMessageSent }: SendProps) {
       }
     }
 
-    // NUEVO: Si hay más de 100 contactos, ofrecer modo background
-    if (contacts.length > 100 && !data.useBackgroundMode) {
-      const useBackground = confirm(
-        `Tienes ${contacts.length} contactos.\n\n` +
-        `¿Deseas usar el modo BACKGROUND?\n\n` +
-        `✅ No requiere mantener el navegador abierto\n` +
-        `✅ Puedes pausar/reanudar en cualquier momento\n` +
-        `✅ Reintentos automáticos\n` +
-        `✅ Monitoreo en tiempo real\n\n` +
-        `Presiona OK para usar modo background, o Cancelar para envío normal.`
+    // 🚫 DESHABILITADO: Modo background tiene problemas, siempre usar modo normal
+    // Si hay MÁS de 5000 contactos, mostrar advertencia
+    if (contacts.length > 5000) {
+      alert(
+        `⚠️ ADVERTENCIA: Tienes ${contacts.length} contactos.\n\n` +
+        `Por razones de estabilidad, se recomienda dividir la campaña en lotes más pequeños.\n\n` +
+        `El envío continuará de manera normal.`
       );
-      
-      if (useBackground) {
-        data.useBackgroundMode = true;
-      }
     }
 
-    // NUEVO: Modo background para campañas grandes
-    if (data.useBackgroundMode) {
+    // 🚫 MODO BACKGROUND DESHABILITADO - SIEMPRE USAR MODO NORMAL
+    const useBackgroundMode = false;
+    
+    if (useBackgroundMode) {
       try {
         const campaignName = data.campaignName || `Campaña ${selectedTemplate.name} - ${new Date().toLocaleString('es-CO')}`;
         const batchId = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

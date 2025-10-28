@@ -1777,9 +1777,17 @@ const activeCampaigns = new Map();
 
 // Función helper para enviar un mensaje individual
 async function sendSingleMessage(db, userId, to, template, batchId, creds) {
+  console.log(`📞 sendSingleMessage called:`, {
+    to,
+    templateName: template?.name,
+    batchId,
+    hasCreds: !!creds
+  });
+  
   // 🚨 CRÍTICO: Validar créditos ANTES de enviar
   const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
   if (!user) {
+    console.error(`❌ Usuario no encontrado: ${userId}`);
     return { success: false, error: 'user_not_found', skipped: true };
   }
   
@@ -1914,6 +1922,15 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
   };
 
   const url = `https://graph.facebook.com/v22.0/${creds.phoneNumberId}/messages`;
+  
+  console.log(`🌐 Enviando a WhatsApp API:`, {
+    url,
+    to: String(to),
+    template: template.name,
+    hasToken: !!creds.accessToken,
+    hasPhoneId: !!creds.phoneNumberId
+  });
+  
   const gRes = await fetch(url, {
     method: 'POST',
     headers: {
@@ -1923,9 +1940,22 @@ async function sendSingleMessage(db, userId, to, template, batchId, creds) {
     body: JSON.stringify(payload)
   });
   
+  console.log(`📥 Respuesta de WhatsApp:`, {
+    status: gRes.status,
+    ok: gRes.ok,
+    statusText: gRes.statusText
+  });
+  
   const text = await gRes.text().catch(() => '');
   let graphJson;
   try { graphJson = JSON.parse(text); } catch { graphJson = { raw: text }; }
+  
+  if (!gRes.ok) {
+    console.error(`❌ Error de WhatsApp API para ${to}:`, {
+      status: gRes.status,
+      response: graphJson
+    });
+  }
 
   // 🚨 CRÍTICO: Descontar 1 crédito SOLO si envío fue exitoso
   if (gRes.ok) {
