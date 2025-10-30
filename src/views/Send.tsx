@@ -30,6 +30,7 @@ interface SendProps {
 export function Send({ onMessageSent }: SendProps) {
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [showChecklist, setShowChecklist] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
   const [checklistConfirmed, setChecklistConfirmed] = useState(false);
@@ -265,6 +266,8 @@ export function Send({ onMessageSent }: SendProps) {
     }
 
   setSending(true);
+  setCancelled(false); // Resetear estado de cancelación al iniciar nuevo envío
+  setPaused(false); // Resetear pausa al iniciar nuevo envío
     setSendProgress({ total: contacts.length, sent: 0, percentage: 0, isActive: true });
     
     addActivity({
@@ -284,14 +287,34 @@ export function Send({ onMessageSent }: SendProps) {
   const batchId = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     for (let i = 0; i < contacts.length; i++) {
+      // Verificar si se canceló el envío
+      if (cancelled) {
+        addActivity({
+          title: '🛑 Envío cancelado',
+          description: `Envío detenido por el usuario. Enviados: ${successCount}/${contacts.length}`,
+          type: 'error',
+        });
+        break;
+      }
+
       if (paused) {
         await new Promise(resolve => {
           const checkPause = () => {
-            if (!paused) resolve(undefined);
+            if (!paused || cancelled) resolve(undefined);
             else setTimeout(checkPause, 100);
           };
           checkPause();
         });
+        
+        // Verificar nuevamente si se canceló durante la pausa
+        if (cancelled) {
+          addActivity({
+            title: '🛑 Envío cancelado',
+            description: `Envío detenido por el usuario. Enviados: ${successCount}/${contacts.length}`,
+            type: 'error',
+          });
+          break;
+        }
       }
 
   const contact = contacts[i];
@@ -831,15 +854,32 @@ export function Send({ onMessageSent }: SendProps) {
                   Iniciar Envío
                 </Button>
               ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  icon={paused ? Play : Pause}
-                  onClick={() => setPaused(!paused)}
-                  className="flex-1"
-                >
-                  {paused ? 'Reanudar' : 'Pausar'}
-                </Button>
+                <div className="flex gap-2 flex-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    icon={paused ? Play : Pause}
+                    onClick={() => setPaused(!paused)}
+                    className="flex-1"
+                  >
+                    {paused ? 'Reanudar' : 'Pausar'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="danger"
+                    onClick={() => {
+                      if (confirm('¿Estás seguro de que quieres cancelar el envío? Los mensajes que ya se enviaron no se pueden detener.')) {
+                        setCancelled(true);
+                        setSending(false);
+                        setSendProgress({ ...sendProgress, isActive: false });
+                        toast.success('Envío cancelado');
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    🛑 Cancelar
+                  </Button>
+                </div>
               )}
             </div>
           </form>
