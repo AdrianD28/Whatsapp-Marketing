@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Send as SendIcon, Play, Pause, Users, Settings, Eye, Activity } from 'lucide-react';
 import { useForm } from 'react-hook-form';
@@ -30,7 +30,7 @@ interface SendProps {
 export function Send({ onMessageSent }: SendProps) {
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [cancelled, setCancelled] = useState(false);
+  const cancelledRef = useRef(false); // Usar ref para actualización inmediata
   const [showChecklist, setShowChecklist] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
   const [checklistConfirmed, setChecklistConfirmed] = useState(false);
@@ -266,7 +266,7 @@ export function Send({ onMessageSent }: SendProps) {
     }
 
   setSending(true);
-  setCancelled(false); // Resetear estado de cancelación al iniciar nuevo envío
+  cancelledRef.current = false; // Resetear ref de cancelación al iniciar nuevo envío
   setPaused(false); // Resetear pausa al iniciar nuevo envío
     setSendProgress({ total: contacts.length, sent: 0, percentage: 0, isActive: true });
     
@@ -288,7 +288,7 @@ export function Send({ onMessageSent }: SendProps) {
 
     for (let i = 0; i < contacts.length; i++) {
       // Verificar si se canceló el envío
-      if (cancelled) {
+      if (cancelledRef.current) {
         const sent = successCount;
         const remaining = contacts.length - i;
         addActivity({
@@ -302,14 +302,14 @@ export function Send({ onMessageSent }: SendProps) {
       if (paused) {
         await new Promise(resolve => {
           const checkPause = () => {
-            if (!paused || cancelled) resolve(undefined);
+            if (!paused || cancelledRef.current) resolve(undefined);
             else setTimeout(checkPause, 100);
           };
           checkPause();
         });
         
         // Verificar nuevamente si se canceló durante la pausa
-        if (cancelled) {
+        if (cancelledRef.current) {
           const sent = successCount;
           const remaining = contacts.length - i;
           addActivity({
@@ -524,7 +524,7 @@ export function Send({ onMessageSent }: SendProps) {
             }
 
             // Verificar cancelación justo antes de enviar
-            if (cancelled) {
+            if (cancelledRef.current) {
               throw new Error('CANCELLED');
             }
 
@@ -899,7 +899,7 @@ export function Send({ onMessageSent }: SendProps) {
                         `Solo se detendrán los ${remaining} mensajes restantes.\n\n` +
                         `¿Confirmas la cancelación?`
                       )) {
-                        setCancelled(true);
+                        cancelledRef.current = true; // Usar ref para actualización inmediata
                         setSending(false);
                         setSendProgress({ ...sendProgress, isActive: false });
                         toast.success(`Envío cancelado. ${remaining} mensajes no serán enviados.`);
