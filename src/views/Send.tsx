@@ -523,6 +523,11 @@ export function Send({ onMessageSent }: SendProps) {
               }
             }
 
+            // Verificar cancelación justo antes de enviar
+            if (cancelled) {
+              throw new Error('CANCELLED');
+            }
+
             const resp = await sendMessage(toNumber, selectedTemplate.name, lang, params, undefined, { batchId });
             try {
               const msgId = resp?.messages?.[0]?.id;
@@ -546,6 +551,16 @@ export function Send({ onMessageSent }: SendProps) {
         }
 
       } catch (error: any) {
+        // Si es cancelación, romper el loop inmediatamente
+        if (error.message === 'CANCELLED') {
+          addActivity({
+            title: '🛑 Envío cancelado',
+            description: `Enviados: ${successCount}/${contacts.length}. Detenidos: ${contacts.length - successCount}`,
+            type: 'error',
+          });
+          break;
+        }
+        
         console.error('Error sending message:', error);
         errorCount++;
         
