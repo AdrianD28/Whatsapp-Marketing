@@ -289,9 +289,11 @@ export function Send({ onMessageSent }: SendProps) {
     for (let i = 0; i < contacts.length; i++) {
       // Verificar si se canceló el envío
       if (cancelled) {
+        const sent = successCount;
+        const remaining = contacts.length - i;
         addActivity({
-          title: '🛑 Envío cancelado',
-          description: `Envío detenido por el usuario. Enviados: ${successCount}/${contacts.length}`,
+          title: '🛑 Envío cancelado por el usuario',
+          description: `Ya enviados a WhatsApp: ${sent}. Detenidos: ${remaining}. ⚠️ Los mensajes ya enviados a Meta llegarán de todas formas.`,
           type: 'error',
         });
         break;
@@ -308,9 +310,11 @@ export function Send({ onMessageSent }: SendProps) {
         
         // Verificar nuevamente si se canceló durante la pausa
         if (cancelled) {
+          const sent = successCount;
+          const remaining = contacts.length - i;
           addActivity({
-            title: '🛑 Envío cancelado',
-            description: `Envío detenido por el usuario. Enviados: ${successCount}/${contacts.length}`,
+            title: '🛑 Envío cancelado por el usuario',
+            description: `Ya enviados a WhatsApp: ${sent}. Detenidos: ${remaining}. ⚠️ Los mensajes ya enviados a Meta llegarán de todas formas.`,
             type: 'error',
           });
           break;
@@ -868,11 +872,22 @@ export function Send({ onMessageSent }: SendProps) {
                     type="button"
                     variant="danger"
                     onClick={() => {
-                      if (confirm('¿Estás seguro de que quieres cancelar el envío? Los mensajes que ya se enviaron no se pueden detener.')) {
+                      const sent = sendProgress.sent;
+                      const remaining = sendProgress.total - sent;
+                      if (confirm(
+                        `⚠️ CANCELAR ENVÍO\n\n` +
+                        `📊 Estado actual:\n` +
+                        `• Mensajes YA enviados a WhatsApp: ${sent}\n` +
+                        `• Mensajes restantes: ${remaining}\n\n` +
+                        `🚨 IMPORTANTE:\n` +
+                        `Los ${sent} mensajes ya enviados LLEGARÁN porque ya están en los servidores de Meta.\n` +
+                        `Solo se detendrán los ${remaining} mensajes restantes.\n\n` +
+                        `¿Confirmas la cancelación?`
+                      )) {
                         setCancelled(true);
                         setSending(false);
                         setSendProgress({ ...sendProgress, isActive: false });
-                        toast.success('Envío cancelado');
+                        toast.success(`Envío cancelado. ${remaining} mensajes no serán enviados.`);
                       }
                     }}
                     className="flex-1"
